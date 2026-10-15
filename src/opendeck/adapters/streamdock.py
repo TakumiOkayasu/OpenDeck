@@ -33,10 +33,12 @@ def _load(sdk_path: Path) -> _Sdk:
     if not (source_path / "StreamDock" / "DeviceManager.py").is_file():
         raise StreamDockError(f"SDK source not found: {source_path}")
     loaded = sys.modules.get("StreamDock")
-    if loaded is not None and not Path(loaded.__file__).resolve().is_relative_to(
-        source_path
-    ):
-        raise StreamDockError("A different StreamDock SDK is already imported")
+    if loaded is not None:
+        loaded_file = getattr(loaded, "__file__", None)
+        if loaded_file is None or not Path(loaded_file).resolve().is_relative_to(
+            source_path
+        ):
+            raise StreamDockError("A different StreamDock SDK is already imported")
     if str(source_path) not in sys.path:
         sys.path.insert(0, str(source_path))
     try:

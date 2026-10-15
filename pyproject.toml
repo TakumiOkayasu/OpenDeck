@@ -37,6 +37,17 @@ only-include = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.pyright]
+include = ["src", "tests"]
+extraPaths = ["src"]
+exclude = [".venv", "vendor"]
+# Excluded SDK files should not emit diagnostics even when opened in the editor.
+ignore = ["vendor"]
+pythonVersion = "3.14"
+typeCheckingMode = "basic"
+venvPath = "."
+venv = ".venv"
+
 [tool.ruff]
 target-version = "py314"
 extend-exclude = ["vendor"]

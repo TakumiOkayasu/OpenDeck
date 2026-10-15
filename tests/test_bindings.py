@@ -25,8 +25,9 @@ def test_selection_uses_a_stable_snapshot_without_executing() -> None:
 
 def test_bindings_cannot_be_reassigned() -> None:
     bindings = Binding({})
+    attribute = "_actions"
     with pytest.raises(FrozenInstanceError):
-        bindings._actions = {}
+        setattr(bindings, attribute, {})
 
 
 def test_selection_preserves_the_supplied_action() -> None:
@@ -39,4 +40,5 @@ def test_selection_preserves_the_supplied_action() -> None:
     selected = bindings.select(Slot("launch"))
 
     assert selected is action
+    assert selected is not None
     assert selected.run().status is Status.DONE

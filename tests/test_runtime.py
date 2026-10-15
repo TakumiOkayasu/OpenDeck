@@ -60,6 +60,8 @@ def test_input_already_handed_over_survives_origin_close():
     source.publish(slot)
     received = source.take()
     source.close()
+    assert received is not None
     chosen = Binding({slot: action}).select(received)
+    assert chosen is not None
     assert chosen.run().status is Status.DONE
     assert action.calls == 1

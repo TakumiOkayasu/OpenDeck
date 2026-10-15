@@ -1,8 +1,12 @@
+from collections.abc import MutableMapping
 from copy import deepcopy
+from operator import setitem
+from typing import cast
 
 import pytest
 
 from opendeck.config import ConfigError, parse
+from opendeck.launch import Launch
 from opendeck.model import Result, Slot, Status
 
 
@@ -36,8 +40,11 @@ def test_parse_has_no_external_effect_and_snapshot_is_immutable():
     assert target.calls == []
     assert settings.keys[1] == Slot("a")
     with pytest.raises(TypeError):
-        settings.keys[1] = Slot("b")
-    settings.binding.select(Slot("a")).run()
+        # Exercise runtime immutability despite the read-only static interface.
+        setitem(cast(MutableMapping[int, Slot], settings.keys), 1, Slot("b"))
+    selected = settings.binding.select(Slot("a"))
+    assert selected is not None
+    selected.run()
     assert target.calls == [("app", "argument with spaces")]
     assert settings.binding.select(Slot("a")) is settings.binding.select(
         Slot("together")
@@ -51,9 +58,11 @@ def test_device_change_preserves_upper_input_definition_and_bindings():
     first, second = parse(data, RecordingStart()), parse(other, RecordingStart())
     assert first.inputs == second.inputs
     assert first.chords == second.chords
-    assert first.binding.select(Slot("together")).argv == (
-        second.binding.select(Slot("together")).argv
-    )
+    first_action = first.binding.select(Slot("together"))
+    second_action = second.binding.select(Slot("together"))
+    assert isinstance(first_action, Launch)
+    assert isinstance(second_action, Launch)
+    assert first_action.argv == second_action.argv
 
 
 @pytest.mark.parametrize(

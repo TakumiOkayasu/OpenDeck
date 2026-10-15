@@ -4,13 +4,16 @@
 
 ## 今回の実装範囲
 
-Python 3.14で、ボタンの単独入力と同時押しを理想入力へ適合し、不変のキーコンフィグからActionを選んで実行する。N4 Proへの接続には公式Device SDKを利用し、SDKがBUTTONに分類する入力を受け付ける。SDKを必要としない再生入力でも、同じ上位の選択と実行を利用する。
+Python 3.14で、ボタンの単独入力と同時押しを理想入力へ適合し、不変のキーコンフィグからActionを選んで実行する。
+N4 Proへの接続には公式Device SDKを利用し、SDKがBUTTONに分類する入力を受け付ける。
+SDKを必要としない再生入力でも、同じ上位の選択と実行を利用する。
 
 操作の実例はアプリ起動とする。[起動の要件](requirements/launch.md)全体を完成させる範囲ではなく、指定した引数列によるプロセス生成だけを実装する。管理者権限、音量操作、記録マクロ、コンテキスト切替、設定画面、機器への表示は今回の実装に含めない。これらの要件と未確定事項は各要件文書に残す。
 
 ## 契約の表現
 
-交換する能力をPythonのProtocolで表し、実装クラスの共通基底への継承を要求しない。契約名にはI接頭辞を付けず、メソッド名はsnake_caseにする。ジェネリック型を含む基本契約は[ports.py](../src/opendeck/ports.py)、理想入力の識別と実行結果は[model.py](../src/opendeck/model.py)で定義する。
+交換する能力をPythonのProtocolで表し、実装クラスの共通基底への継承を要求しない。契約名にはI接頭辞を付けず、メソッド名はsnake_caseにする。
+ジェネリック型を含む基本契約は[ports.py](../src/opendeck/ports.py)、理想入力の識別と実行結果は[model.py](../src/opendeck/model.py)で定義する。
 
 Inputの返却型は型引数で定める。理想入力の境界でSlotを返すことは、その境界の具体化であり、Inputの一般契約をSlotやパーセンテージへ固定するものではない。
 
@@ -21,7 +24,7 @@ Factoryは外部入力を実現する関連製品を作り、Actionは受け取�
 設定ファイルにはJSONを使う。ファイルの読み込みとJSONの解析は組み立て側で行い、読み込み済みの値を[config.py](../src/opendeck/config.py)のparseへ渡す。parseは構成済みのStart参照を受け、操作を実行・照会せずに設定を検証し、関連オブジェクトを構成する。未知の項目や参照先を勝手に補完しない。
 
 | 項目 | 今回の表現 |
-|---|---|
+| --- | --- |
 | inputs | 機器から独立したSlot名の一覧。空や重複を認めない |
 | chords | inputsにある複数Slot名と、成立時に出力する別のSlot名。同じメンバー集合の重複を認めない |
 | device.keys | 物理ボタン識別子の文字列からSlot名への対応。N4 Pro実装は1から15とし、複数キーを同じ基底Slotに適合させない |
@@ -32,7 +35,10 @@ Factoryは外部入力を実現する関連製品を作り、Actionは受け取�
 
 実機用の操作例は[buttons.json](../examples/buttons.json)、再生用イベントは[button-events.json](../examples/button-events.json)に置く。再生イベントはkeyとpressedを持つ一覧で、記載順に処理する。時刻や待機時間は扱わない。replayでも設定した操作を実行するので、起動先を利用環境に合わせる。セットアップとCLIの実行手順は[README](../README.md)を参照する。
 
-入力実現側では、共通の純粋関数validate_adaptationで適合設定を検証する。各物理入力を異なる基底Slotへ対応付け、同時押しの全メンバーが直接適合した基底Slotであることを要求する。複数の物理入力を同じSlotへ対応付ける定義や、未適合Slotをメンバーに含む定義は接続開始前に拒否する。組合せの出力を別の組合せへ再合成するnested chordは今回の認識方式では実現しない。この制約は下位実装の適合能力として扱い、上位の理想入力定義を制限する共通要件にはしない。
+入力実現側では、共通の純粋関数validate_adaptationで適合設定を検証する。
+各物理入力を異なる基底Slotへ対応付け、同時押しの全メンバーが直接適合した基底Slotであることを要求する。
+複数の物理入力を同じSlotへ対応付ける定義や、未適合Slotをメンバーに含む定義は接続開始前に拒否する。組合せの出力を別の組合せへ再合成するnested chordは今回の認識方式では実現しない。
+この制約は下位実装の適合能力として扱い、上位の理想入力定義を制限する共通要件にはしない。
 
 ## キーコンフィグと操作
 
@@ -64,7 +70,9 @@ SlotとキーコンフィグからActionを選ぶ処理は純粋関数にする�
 
 SourceはFIFOの未処理入力を保持し、InputとSubjectを別の能力として提供する。初期状態では受理せず、接続開始時にstartで有効にする。live入力では初期の上限を256件とする。通知には値を載せず、Observerのon_changeは処理側の起床を予約するだけとする。通知回数と入力件数を対応させない。
 
-replayは有限のイベントJSON全体を先にメモリへ読み込み、openで認識した入力を提出してから実行側が取り出す。この取得方式に合わせ、Sourceの容量をmax(1, len(events))とし、有限記録の件数を理由にlive入力の上限へ抵触させない。SDKを利用しない認識・割り当て・実行の検証用であり、リアルタイム取得の性能や長期ストリームの挙動を模擬・保証するものではない。
+replayは有限のイベントJSON全体を先にメモリへ読み込み、openで認識した入力を提出してから実行側が取り出す。
+この取得方式に合わせ、Sourceの容量を `max(1, len(events))` とし、有限記録の件数を理由にlive入力の上限へ抵触させない。
+SDKを利用しない認識・割り当て・実行の検証用であり、リアルタイム取得の性能や長期ストリームの挙動を模擬・保証するものではない。
 
 処理側はtakeを繰り返して各入力を一度だけ取り出し、空になるまで順序どおり実行する。Actionを実行するのは処理側であり、SDKのreader threadではない。ロックを保持したままObserverを呼ばない。組み立て時には初回の配送も予約する。
 
@@ -79,7 +87,7 @@ Sourceは失敗を保持し、takeはInputErrorを送出する。単に入力が
 ## コードの配置と利用範囲
 
 | ファイル | 責務 |
-|---|---|
+| --- | --- |
 | [model.py](../src/opendeck/model.py) | 上位の理想入力と組合せの定義、共通の実行結果 |
 | [ports.py](../src/opendeck/ports.py) | 交換する能力と関連製品の契約 |
 | [bindings.py](../src/opendeck/bindings.py) | 不変のキーコンフィグから操作を選ぶ純粋な処理 |
@@ -104,7 +112,9 @@ CLI自身の結果出力はJSONとし、起動先のstdioはDEVNULLへ分ける�
 
 ## SDKとの接続
 
-SDKは[MiraboxSpace/StreamDock-Device-SDK](https://github.com/MiraboxSpace/StreamDock-Device-SDK)をgit submoduleとしてvendor/streamdock-sdkへ配置し、リビジョン7f0d47fe91033b0883edf29b574a6c74ea9bed00へ固定する。SDKのファイルは変更しない。
+SDKは[MiraboxSpace/StreamDock-Device-SDK](https://github.com/MiraboxSpace/StreamDock-Device-SDK)を
+`git submodule` として `vendor/streamdock-sdk` へ配置し、
+リビジョン `7f0d47fe91033b0883edf29b574a6c74ea9bed00` へ固定する。SDKのファイルは変更しない。
 
 SDKとnative transport libraryは、StreamDockFactory.makeまたはlist_devicesで機器を列挙する時に読み込む。中核処理、再生入力、純粋関数のテストをimportするだけでSDKやDLLを読み込まない。makeは列挙して製品を生成するが機器をopenしない。SDK側はTransportDLLを自分のモジュール位置から探すため、そのディレクトリ構成を保って読み込む。
 
@@ -137,7 +147,7 @@ SDKのreader、heartbeat、独自の監視threadが停止したことを確認�
 以下は固定リビジョンの公式ソースで確認した事実と、そこからの実装判断である。実機での通知欠落の有無や同時押し対応を証明するものではない。
 
 | 確認した箇所 | 事実と実装判断 |
-|---|---|
+| --- | --- |
 | [SDK概要](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/7f0d47fe91033b0883edf29b574a6c74ea9bed00/docs/readme.en.md#L34-L68) | Python/C++のWindows/macOS対応が記載される。今回の実測済み対応範囲とは分ける |
 | [N4 Pro decoder](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/7f0d47fe91033b0883edf29b574a6c74ea9bed00/Python-SDK/src/StreamDock/Devices/StreamDockN4Pro.py#L129-L164) | 通常キーと副画面入力をBUTTONに分類し、押下・解放へ変換する。機器側の実際の通知列は実機確認が必要 |
 | [reader](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/7f0d47fe91033b0883edf29b574a6c74ea9bed00/Python-SDK/src/StreamDock/Devices/StreamDock.py#L499-L538) | reader threadが個別イベントを取得し、key callbackを呼ぶ。上位の実行をcallbackで待たない |
