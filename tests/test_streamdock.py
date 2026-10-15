@@ -1,5 +1,7 @@
 import threading
 import unittest
+import warnings
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -105,6 +107,88 @@ def event(key, state, event_type="button"):
     return SimpleNamespace(
         event_type=event_type, key=SimpleNamespace(value=key), state=state
     )
+
+
+class SdkLoadingTests(unittest.TestCase):
+    def load(self, on_import):
+        modules = {
+            "StreamDock.DeviceManager": SimpleNamespace(
+                DeviceManager=lambda: FakeManager([])
+            ),
+            "StreamDock.Devices.StreamDockN4Pro": SimpleNamespace(
+                StreamDockN4Pro=FakeN4Pro
+            ),
+            "StreamDock.InputTypes": SimpleNamespace(
+                EventType=SimpleNamespace(BUTTON="button")
+            ),
+        }
+
+        def import_module(name):
+            if name == "StreamDock.DeviceManager":
+                on_import()
+            return modules[name]
+
+        with (
+            patch.object(Path, "is_file", return_value=True),
+            patch.object(streamdock.sys, "path", []),
+            patch.dict(streamdock.sys.modules, {"StreamDock": None}),
+            patch.object(
+                streamdock.importlib, "import_module", side_effect=import_module
+            ),
+        ):
+            return streamdock._load(Path("sdk-checkout"))
+
+    def test_wmi_docstring_warnings_are_scoped_to_sdk_import(self):
+        source = r'"""GetObjectText\_"""' "\ndef new():\n" r'    """SpawnInstance\_"""'
+        for filename in ("wmi.py", "/deps/wmi.py", r"C:\deps\wmi.py"):
+            with (
+                self.subTest(filename=filename),
+                warnings.catch_warnings(record=True) as caught,
+            ):
+                warnings.simplefilter("always")
+                sdk = self.load(partial(compile, source, filename, "exec"))
+                self.assertIsInstance(sdk.manager, FakeManager)
+                self.assertIs(sdk.n4pro, FakeN4Pro)
+                self.assertEqual(sdk.button, "button")
+                self.assertEqual(caught, [])
+                compile(source, filename, "exec")
+                self.assertEqual(len(caught), 2)
+
+    def test_unrelated_import_warnings_remain_visible(self):
+        cases = (
+            (r'"""GetObjectText\_"""', "other.py"),
+            (r'"""Other escape\q"""', "wmi.py"),
+        )
+        for source, filename in cases:
+            with (
+                self.subTest(source=source, filename=filename),
+                warnings.catch_warnings(record=True) as caught,
+            ):
+                warnings.simplefilter("always")
+                self.load(partial(compile, source, filename, "exec"))
+                self.assertEqual(len(caught), 1)
+                self.assertIs(caught[0].category, SyntaxWarning)
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            self.load(
+                lambda: warnings.warn_explicit(
+                    r'"\_" is an invalid escape sequence.', UserWarning, "wmi.py", 1
+                )
+            )
+            self.assertEqual(len(caught), 1)
+            self.assertIs(caught[0].category, UserWarning)
+
+    def test_failed_import_restores_warning_filters(self):
+        def fail():
+            raise ImportError("missing dependency")
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with self.assertRaisesRegex(StreamDockError, "missing dependency"):
+                self.load(fail)
+            compile(r'"""GetObjectText\_"""', "wmi.py", "exec")
+            self.assertEqual(len(caught), 1)
 
 
 class StreamDockTests(unittest.TestCase):

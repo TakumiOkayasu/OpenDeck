@@ -108,6 +108,8 @@ SDKは[MiraboxSpace/StreamDock-Device-SDK](https://github.com/MiraboxSpace/Strea
 
 SDKとnative transport libraryは、StreamDockFactory.makeまたはlist_devicesで機器を列挙する時に読み込む。中核処理、再生入力、純粋関数のテストをimportするだけでSDKやDLLを読み込まない。makeは列挙して製品を生成するが機器をopenしない。SDK側はTransportDLLを自分のモジュール位置から探すため、そのディレクトリ構成を保って読み込む。
 
+Windows向け依存のwmi 1.5.1にはdocstring内の不正な`\_`があり、Python 3.14で初回import時にSyntaxWarningが出る。DeviceManagerのimport中だけ、wmi由来のこの警告を限定して抑制する。他の警告やimport失敗は隠さず、SDKと依存パッケージのファイルは変更しない。
+
 SDKのopenがFalseを返す場合は接続失敗として扱う。open後の初期化で例外が出た場合とは区別し、後者も入力を受理できる状態にはしない。makeで生成しただけ、または機器が列挙できただけでは、接続成功としない。
 
 Link.openはcallbackを登録してからSDKをopenし、initの完了後にSourceを開始して入力受理を有効にする。openとinitの途中で届いたイベントは受理しない。初期化に失敗した時もcallbackと接続資源を解放し、元の開始失敗と解放失敗の両方がある場合はExceptionGroupで報告する。

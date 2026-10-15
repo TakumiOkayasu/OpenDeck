@@ -1,6 +1,7 @@
 import importlib
 import sys
 import threading
+import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,7 +40,19 @@ def _load(sdk_path: Path) -> _Sdk:
     if str(source_path) not in sys.path:
         sys.path.insert(0, str(source_path))
     try:
-        manager = importlib.import_module("StreamDock.DeviceManager").DeviceManager()
+        with warnings.catch_warnings():
+            # WMI 1.5.1 has invalid docstring escapes. Compilation warnings use
+            # the source path rather than the import name.
+            warnings.filterwarnings(
+                "ignore",
+                message=r'"\\_" is an invalid escape sequence\.',
+                category=SyntaxWarning,
+                module=r"(?:.*[\\/])?wmi$",
+            )
+            manager_class = importlib.import_module(
+                "StreamDock.DeviceManager"
+            ).DeviceManager
+        manager = manager_class()
         n4pro = importlib.import_module(
             "StreamDock.Devices.StreamDockN4Pro"
         ).StreamDockN4Pro
