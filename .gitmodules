@@ -1,0 +1,3 @@
+[submodule "vendor/streamdock-sdk"]
+	path = vendor/streamdock-sdk
+	url = https://github.com/MiraboxSpace/StreamDock-Device-SDK.git
