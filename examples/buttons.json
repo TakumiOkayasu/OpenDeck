@@ -1,0 +1,10 @@
+{
+  "inputs": ["primary", "secondary", "together"],
+  "chords": [{"inputs": ["primary", "secondary"], "slot": "together"}],
+  "device": {"keys": {"1": "primary", "2": "secondary"}},
+  "actions": {
+    "notes": {"kind": "launch", "argv": ["notepad.exe"]},
+    "files": {"kind": "launch", "argv": ["explorer.exe"]}
+  },
+  "bindings": {"primary": "notes", "together": "files"}
+}

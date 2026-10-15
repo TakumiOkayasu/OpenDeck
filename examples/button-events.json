@@ -1,0 +1,8 @@
+[
+  {"key": 1, "pressed": true},
+  {"key": 1, "pressed": false},
+  {"key": 1, "pressed": true},
+  {"key": 2, "pressed": true},
+  {"key": 2, "pressed": false},
+  {"key": 1, "pressed": false}
+]
