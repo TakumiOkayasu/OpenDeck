@@ -5,7 +5,7 @@
 ## 今回の実装範囲
 
 Python 3.14で、ボタンの単独入力と同時押しを理想入力へ適合し、不変のキーコンフィグからActionを選んで実行する。
-N4 Proへの接続には公式Device SDKを利用し、SDKがBUTTONに分類する入力を受け付ける。
+N4 Proへの接続には公式Device SDKを利用し、SDKがBUTTONに分類する入力を受け付ける。通常ボタンの識別子はアダプタ側でraw入力コードに合わせる。
 SDKを必要としない再生入力でも、同じ上位の選択と実行を利用する。
 
 操作の実例はアプリ起動とする。[起動の要件](requirements/launch.md)全体を完成させる範囲ではなく、指定した引数列によるプロセス生成だけを実装する。管理者権限、音量操作、記録マクロ、コンテキスト切替、設定画面、機器への表示は今回の実装に含めない。これらの要件と未確定事項は各要件文書に残す。
@@ -27,7 +27,7 @@ Factoryは外部入力を実現する関連製品を作り、Actionは受け取�
 | --- | --- |
 | inputs | 機器から独立したSlot名の一覧。空や重複を認めない |
 | chords | inputsにある複数Slot名と、成立時に出力する別のSlot名。同じメンバー集合の重複を認めない |
-| device.keys | 物理ボタン識別子の文字列からSlot名への対応。N4 Pro実装は1から15とし、複数キーを同じ基底Slotに適合させない |
+| device.keys | 物理入力識別子の文字列からSlot名への対応。範囲は1から15。複数キーを同じ基底Slotに適合させない |
 | actions | 名前から操作定義への対応。今回のkindはlaunchだけを受け付け、argvに空でない引数列を指定する |
 | bindings | Slot名からactionsにある操作名への対応。未割り当てのSlotを残せる |
 
@@ -128,9 +128,24 @@ SDKのinitは画面の起床、輝度変更、アイコン消去などを伴う�
 
 SDKのinitは結果を返さず、内部の個別書き込みがすべて成功したかを集約していない。今回の入力受理の開始条件は、openが成功を返し、initが例外なく復帰したことまでである。機器側の初期化完了と入力取得の適合は実機で確認し、この開始条件だけで基本設計の実機成立条件を満たしたとしない。
 
-SDKのkey callbackではEventType.BUTTONのイベントを受け付ける。取得済み情報を認識処理へ渡し、成立した理想入力をSourceへ追加して戻る。TOUCH_POINT、KNOB_ROTATE、KNOB_PRESS、SWIPEなど、BUTTON以外に分類されたイベントは受け付けない。
+SDKのkey callbackではEventType.BUTTONのイベントを受け付ける。取得済み情報を認識処理へ渡し、成立した理想入力をSourceへ追加して戻る。
+`TOUCH_POINT`、`KNOB_ROTATE`、`KNOB_PRESS`、`SWIPE`など、BUTTON以外に分類されたイベントは受け付けない。
 
-N4 Proのdecoderは通常キーと副画面の入力を同じBUTTON型に変換する。アダプタが設定可能とするSDK上の識別子1から15は、機器の全入力が同じ押下・解放の通知列を提供することを保証する範囲ではない。副画面を含む実際の保持・解放・重複の挙動と、通常キーとの差は実機で確認する。
+ユーザーがWindows上のN4 Pro（firmware `V4.N4 Pro E.02.010`）で採取したログでは、
+入力パケットのヘッダーは `ACK..OK`、byte9は通常ボタンのrawコード1から10、byte10は押下 `01`・解放 `00` だった（byte位置は0始まり）。
+これは通常ボタンの入力番号であり、SDKの画像配置用インデックスではない。
+
+固定SDKの `StreamDockN4Pro.decode_input_event` は画像配置マップを誤って逆引きし、raw1から5をSDKキー11から15へ、
+raw6から10を同じ6から10へ変換する。
+サンプルの `device.keys` は1・2なので、観測した通常ボタン操作はいずれも設定に一致せず無視された。サンプルの番号は変更せず、入力側で補正する。
+
+アダプタはSDKのraw callbackでパケットを記録し、同じreader thread・同じ接続世代のkey callbackに対応付ける。
+対応する通常ボタンのrawコード1から10を、SDKの画像配置由来のキー番号より優先して入力識別子に使う。
+認識・配送はkey callbackから一回だけ行い、raw callbackから二重に配送しない。SDKファイルは変更しない。
+
+副画面のrawコード `0x40` から `0x43` と他種別のイベントには通常ボタンの補正を適用せず、従来のSDKデコード・型フィルターを保つ。
+raw `0x40` のタッチ入力もSDKキー11になるため、SDKの11を一律に1へ変換すると通常ボタン1と衝突する。
+設定可能な識別子1から15は、すべてが同じ押下・解放の通知列を持つ保証ではない。副画面の実際の押下・解放・保持・重複は未確認で、解放などのイベントを合成しない。
 
 機器の取り外しは、停止可能な独自のポーリング処理でtransportの列挙結果を0.5秒間隔で調べる。SDKのDeviceManager.listenは停止条件を持たないループなので利用しない。SDKのreadがNoneを返すことだけでは切断と判定しない。接続管理の同期と古いcallbackを無効にする処理は接続実装内に置く。
 
@@ -149,7 +164,7 @@ SDKのreader、heartbeat、独自の監視threadが停止したことを確認�
 | 確認した箇所 | 事実と実装判断 |
 | --- | --- |
 | [SDK概要](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/7f0d47fe91033b0883edf29b574a6c74ea9bed00/docs/readme.en.md#L34-L68) | Python/C++のWindows/macOS対応が記載される。今回の実測済み対応範囲とは分ける |
-| [N4 Pro decoder](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/7f0d47fe91033b0883edf29b574a6c74ea9bed00/Python-SDK/src/StreamDock/Devices/StreamDockN4Pro.py#L129-L164) | 通常キーと副画面入力をBUTTONに分類し、押下・解放へ変換する。機器側の実際の通知列は実機確認が必要 |
+| [N4 Pro decoder](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/7f0d47fe91033b0883edf29b574a6c74ea9bed00/Python-SDK/src/StreamDock/Devices/StreamDockN4Pro.py#L129-L164) | 通常キーと副画面入力をBUTTONに分類するが、通常キーの番号に画像配置マップの逆引きを使う。上記の補正はアダプタ内に限定し、副画面の通知列は実機確認に残す |
 | [reader](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/7f0d47fe91033b0883edf29b574a6c74ea9bed00/Python-SDK/src/StreamDock/Devices/StreamDock.py#L499-L538) | reader threadが個別イベントを取得し、key callbackを呼ぶ。上位の実行をcallbackで待たない |
 | [openとinit](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/7f0d47fe91033b0883edf29b574a6c74ea9bed00/Python-SDK/src/StreamDock/Devices/StreamDock.py#L152-L177) | openは失敗時にFalseを返す。initは機器への複数の設定を行う。接続と初期化の成否を分ける |
 | [close](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/7f0d47fe91033b0883edf29b574a6c74ea9bed00/Python-SDK/src/StreamDock/Devices/StreamDock.py#L210-L285) | notify=Falseで切断通知書き込みを抑える。readerとheartbeatを停止・待機するが、transport.closeの例外は内部でprintして捕捉する |
@@ -161,6 +176,8 @@ SDKのreader、heartbeat、独自の監視threadが停止したことを確認�
 
 外部依存なしで、入力認識の状態遷移、単独・同時押しの排他、重複イベント、FIFO配送、起床と取り出し、未割り当て、実行結果、切断後の入力無効化を検証する。接続のテストにはfake機器を使い、SDKのopen失敗、初期化例外、切断、終了を区別する。
 
-Windows/macOS上のN4 Pro本体は、この開発環境で実測していない。再生入力やfake機器のテスト成功を、SDK/native libraryや機器本体の適合確認に置き換えない。
+ユーザーのWindows実機ログでは、上記firmwareのN4 Proの接続・初期化と通常ボタンの入力パケット取得を確認している。
+補正後の入力から単独・同時押しの認識、アプリ起動までの一連の動作は実機で未確認であり、全面的な動作保証ではない。
+**macOSでの実機動作も未確認**。再生入力やfake機器のテスト成功を、SDK/native libraryや機器本体の適合確認に置き換えない。
 
 実機では通常キーと副画面入力の識別と通知列の違い、複数保持、押下順と解放順、長押し時の重複、通知欠落、抜き差し、初期化による表示への影響、純正ソフトとの同時利用可否を確認する。失敗時に操作が重複実行されないこと、終了後にreaderや監視が残らないこと、機器を再び開けることも確認する。
