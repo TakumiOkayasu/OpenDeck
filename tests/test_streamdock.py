@@ -1,9 +1,13 @@
+from __future__ import annotations
+
 import threading
 import unittest
 import warnings
+from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import patch
 
 from opendeck.adapters import streamdock
@@ -13,13 +17,15 @@ from opendeck.source import InputError
 
 
 class FakeTransport:
-    def __init__(self, device):
+    def __init__(self, device: FakeN4Pro) -> None:
         self.device = device
         self.present = True
-        self.error = None
+        self.error: Exception | None = None
         self.polled = threading.Event()
 
-    def enumerate_devices(self, vendor_id, product_id):
+    def enumerate_devices(
+        self, vendor_id: int, product_id: int
+    ) -> list[dict[str, str]]:
         self.polled.set()
         if self.error is not None:
             raise self.error
@@ -27,49 +33,53 @@ class FakeTransport:
 
 
 class FakeN4Pro:
-    def __init__(self, serial="one"):
+    def __init__(self, serial: str = "one") -> None:
         self.serial = serial
         self.path = "path-" + serial
         self.vendor_id = 0x5548
         self.product_id = 0x1008
         self.transport = FakeTransport(self)
-        self.callback = None
+        self.callback: Callable[[FakeN4Pro, SimpleNamespace], None] | None = None
         self.opened = 0
         self.initialized = 0
-        self.closed = []
+        self.closed: list[bool] = []
         self.open_result = True
-        self.init_error = None
-        self.close_error = None
-        self.init_events = ()
-        self.read_thread = None
-        self.heartbeat_thread = None
+        self.init_error: Exception | None = None
+        self.close_error: Exception | None = None
+        self.init_events: tuple[SimpleNamespace, ...] = ()
+        self.read_thread: LiveWorker | None = None
+        self.heartbeat_thread: SleepingHeartbeat | None = None
 
-    def get_serial_number(self):
+    def get_serial_number(self) -> str:
         return self.serial
 
-    def set_key_callback(self, callback):
+    def set_key_callback(
+        self, callback: Callable[[FakeN4Pro, SimpleNamespace], None] | None
+    ) -> None:
         self.callback = callback
 
-    def open(self):
+    def open(self) -> bool:
         self.opened += 1
         return self.open_result
 
-    def init(self):
+    def init(self) -> None:
         self.initialized += 1
         for event in self.init_events:
-            self.callback(self, event)
+            callback = self.callback
+            assert callback is not None
+            callback(self, event)
         if self.init_error is not None:
             raise self.init_error
 
-    def close(self, notify):
+    def close(self, notify: bool) -> None:
         self.closed.append(notify)
         if self.close_error is not None:
             raise self.close_error
 
-    def read(self):
+    def read(self) -> None:
         return None
 
-    def emit(self, key, state, event_type="button"):
+    def emit(self, key: int, state: int, event_type: str = "button") -> None:
         if self.callback is not None:
             self.callback(self, event(key, state, event_type))
 
@@ -90,20 +100,33 @@ class Wake:
         self.event.set()
 
 
-class SleepingHeartbeat:
-    def __init__(self):
-        self.alive = True
-        self.join_timeouts = []
+class CallbackObserver:
+    def __init__(self, callback: Callable[[], None]) -> None:
+        self.callback = callback
 
-    def is_alive(self):
+    def on_change(self) -> None:
+        self.callback()
+
+
+class LiveWorker:
+    def is_alive(self) -> bool:
+        return True
+
+
+class SleepingHeartbeat:
+    def __init__(self) -> None:
+        self.alive = True
+        self.join_timeouts: list[float] = []
+
+    def is_alive(self) -> bool:
         return self.alive
 
-    def join(self, timeout):
+    def join(self, timeout: float) -> None:
         self.join_timeouts.append(timeout)
         self.alive = False
 
 
-def event(key, state, event_type="button"):
+def event(key: int, state: int, event_type: str = "button") -> SimpleNamespace:
     return SimpleNamespace(
         event_type=event_type, key=SimpleNamespace(value=key), state=state
     )
@@ -137,6 +160,29 @@ class SdkLoadingTests(unittest.TestCase):
             ),
         ):
             return streamdock._load(Path("sdk-checkout"))
+
+    def test_preimported_sdk_with_unknown_or_foreign_file_is_rejected(self):
+        cases = (
+            ("none", SimpleNamespace(__file__=None)),
+            ("missing", SimpleNamespace()),
+            (
+                "outside",
+                SimpleNamespace(__file__="other-sdk/StreamDock/__init__.py"),
+            ),
+        )
+        for name, loaded in cases:
+            with (
+                self.subTest(module_file=name),
+                patch.object(Path, "is_file", return_value=True),
+                patch.object(streamdock.sys, "path", []),
+                patch.dict(streamdock.sys.modules, {"StreamDock": loaded}),
+                patch.object(streamdock.importlib, "import_module") as import_module,
+            ):
+                with self.assertRaisesRegex(
+                    StreamDockError, "A different StreamDock SDK is already imported"
+                ):
+                    streamdock._load(Path("sdk-checkout"))
+                import_module.assert_not_called()
 
     def test_wmi_docstring_warnings_are_scoped_to_sdk_import(self):
         source = r'"""GetObjectText\_"""' "\ndef new():\n" r'    """SpawnInstance\_"""'
@@ -264,6 +310,7 @@ class StreamDockTests(unittest.TestCase):
     def test_overflow_invalidates_recognition_and_late_callbacks_are_ignored(self):
         device = FakeN4Pro()
         product = self.make([device])
+        link = cast(streamdock._Link, product.link)
         product.link.open()
         self.addCleanup(product.link.close)
         for _ in range(257):
@@ -271,29 +318,30 @@ class StreamDockTests(unittest.TestCase):
             device.emit(1, 0)
         with self.assertRaisesRegex(InputError, "capacity"):
             product.input.take()
-        self.assertFalse(product.link._active)
-        self.assertFalse(product.link._state.held)
+        self.assertFalse(link._active)
+        self.assertFalse(link._state.held)
         device.emit(2, 1)
-        self.assertFalse(product.link._state.held)
+        self.assertFalse(link._state.held)
 
     def test_input_and_fault_notifications_run_outside_the_adapter_lock(self):
         device = FakeN4Pro()
         product = self.make([device])
-        observed = []
+        link = cast(streamdock._Link, product.link)
+        observed: list[bool] = []
 
-        def check():
-            acquired = product.link._lock.acquire(blocking=False)
+        def check() -> None:
+            acquired = link._lock.acquire(blocking=False)
             observed.append(acquired)
             if acquired:
-                product.link._lock.release()
+                link._lock.release()
 
-        def on_change():
+        def on_change() -> None:
             worker = threading.Thread(target=check)
             worker.start()
             worker.join(1.0)
             self.assertFalse(worker.is_alive())
 
-        product.subject.add(SimpleNamespace(on_change=on_change))
+        product.subject.add(CallbackObserver(on_change))
         product.link.open()
         self.addCleanup(product.link.close)
         device.emit(1, 1)
@@ -356,7 +404,9 @@ class StreamDockTests(unittest.TestCase):
         with self.assertRaises(ExceptionGroup) as caught:
             product.link.open()
         self.assertIs(caught.exception.exceptions[0], device.init_error)
-        self.assertIs(caught.exception.exceptions[1].exceptions[0], device.close_error)
+        cleanup_error = caught.exception.exceptions[1]
+        assert isinstance(cleanup_error, ExceptionGroup)
+        self.assertIs(cleanup_error.exceptions[0], device.close_error)
 
     def test_monitor_start_failure_cleans_the_opened_sdk_device(self):
         device = FakeN4Pro()
@@ -398,7 +448,9 @@ class StreamDockTests(unittest.TestCase):
             self.assertTrue(device.transport.polled.wait(1.0))
             self.assertIsNone(product.input.take())
             product.link.close()
-        self.assertFalse(product.link._monitor.is_alive())
+        monitor = cast(streamdock._Link, product.link)._monitor
+        assert monitor is not None
+        self.assertFalse(monitor.is_alive())
         self.assertEqual(device.closed, [False])
 
     def test_presence_check_error_is_not_reinterpreted_as_no_input(self):
@@ -424,6 +476,7 @@ class StreamDockTests(unittest.TestCase):
         device.emit(2, 1)
         device.emit(2, 0)
         callback = device.callback
+        assert callback is not None
         product.link.close()
         callback(device, event(1, 1))
         callback(device, event(1, 0))
@@ -435,6 +488,7 @@ class StreamDockTests(unittest.TestCase):
         product = self.make([device])
         product.link.open()
         callback = device.callback
+        assert callback is not None
         product.link.close()
         product.link.open()
         self.addCleanup(product.link.close)
@@ -449,12 +503,14 @@ class StreamDockTests(unittest.TestCase):
         device = FakeN4Pro()
         product = self.make([device])
         product.link.open()
-        device.read_thread = SimpleNamespace(is_alive=lambda: True)
+        device.read_thread = LiveWorker()
         with self.assertRaises(ExceptionGroup) as caught:
             product.link.close()
+        cleanup_error = caught.exception.exceptions[0]
+        assert isinstance(cleanup_error, ExceptionGroup)
         self.assertIn(
             "native release is unconfirmed",
-            str(caught.exception.exceptions[0].exceptions[0]),
+            str(cleanup_error.exceptions[0]),
         )
         self.assertIsNone(device.callback)
 
@@ -462,10 +518,11 @@ class StreamDockTests(unittest.TestCase):
         device = FakeN4Pro()
         product = self.make([device])
         product.link.open()
-        device.heartbeat_thread = SleepingHeartbeat()
+        heartbeat = SleepingHeartbeat()
+        device.heartbeat_thread = heartbeat
         product.link.close()
-        self.assertEqual(device.heartbeat_thread.join_timeouts, [10.1])
-        self.assertFalse(device.heartbeat_thread.is_alive())
+        self.assertEqual(heartbeat.join_timeouts, [10.1])
+        self.assertFalse(heartbeat.is_alive())
         self.assertEqual(device.closed, [False])
 
     def test_close_error_is_not_silently_ignored(self):
@@ -475,8 +532,12 @@ class StreamDockTests(unittest.TestCase):
         device.close_error = RuntimeError("close failed")
         with self.assertRaises(ExceptionGroup) as caught:
             product.link.close()
-        self.assertIs(caught.exception.exceptions[0].exceptions[0], device.close_error)
-        self.assertFalse(product.link._monitor.is_alive())
+        cleanup_error = caught.exception.exceptions[0]
+        assert isinstance(cleanup_error, ExceptionGroup)
+        self.assertIs(cleanup_error.exceptions[0], device.close_error)
+        monitor = cast(streamdock._Link, product.link)._monitor
+        assert monitor is not None
+        self.assertFalse(monitor.is_alive())
 
 
 if __name__ == "__main__":
