@@ -1,4 +1,5 @@
 import importlib
+import logging
 import sys
 import threading
 import warnings
@@ -12,9 +13,15 @@ from ..ports import Observer, Product
 from ..recognition import State, apply, validate_adaptation
 from ..source import Source
 
+_LOGGER = logging.getLogger(__name__)
 _POLL_INTERVAL = 0.5
 _JOIN_TIMEOUT = 2.0
 _HEARTBEAT_JOIN_TIMEOUT = 10.1
+
+
+class _ReaderContext(threading.local):
+    def __init__(self) -> None:
+        self.packet: tuple[int, bytes] | None = None
 
 
 class StreamDockError(RuntimeError):
@@ -29,6 +36,7 @@ class _Sdk:
 
 
 def _load(sdk_path: Path) -> _Sdk:
+    _LOGGER.debug("Loading StreamDock SDK from %s", sdk_path)
     source_path = (sdk_path / "Python-SDK" / "src").resolve()
     if not (source_path / "StreamDock" / "DeviceManager.py").is_file():
         raise StreamDockError(f"SDK source not found: {source_path}")
@@ -67,6 +75,7 @@ def _load(sdk_path: Path) -> _Sdk:
 
 
 def _devices(sdk: _Sdk) -> list[Any]:
+    _LOGGER.debug("Enumerating N4 Pro devices")
     return [
         device for device in sdk.manager.enumerate() if isinstance(device, sdk.n4pro)
     ]
@@ -113,8 +122,12 @@ class StreamDockFactory:
             index = 0
         if index >= len(devices):
             raise StreamDockError(f"N4 Pro device index {index} is out of range")
+        device = devices[index]
+        _LOGGER.debug(
+            "Selected N4 Pro index=%d serial=%r", index, device.get_serial_number()
+        )
         source = Source[Slot]()
-        link = _Link(devices[index], sdk.button, self._keys, self._chords, source)
+        link = _Link(device, sdk.button, self._keys, self._chords, source)
         return Product(link, source, source)
 
 
@@ -140,6 +153,8 @@ class _Link:
         self._active = False
         self._opened = False
         self._generation = 0
+        self._raw_registered = False
+        self._reader_context = _ReaderContext()
 
     def open(self) -> None:
         with self._lifecycle:
@@ -153,9 +168,19 @@ class _Link:
                 self._device.set_key_callback(
                     lambda device, event: self._receive(generation, event)
                 )
+                self._device.set_raw_read_callback(
+                    lambda device, data: self._receive_raw(generation, data)
+                )
+                self._raw_registered = True
+                _LOGGER.debug("Opening N4 Pro")
                 if not self._device.open():
                     raise StreamDockError("SDK could not open the selected N4 Pro")
+                _LOGGER.debug("SDK open completed; initializing N4 Pro")
                 self._device.init()
+                _LOGGER.debug(
+                    "SDK initialization completed; firmware=%r",
+                    self._device.firmware_version,
+                )
                 with self._lock:
                     self._source.start()
                     self._active = True
@@ -181,15 +206,47 @@ class _Link:
                 self._monitor = None
                 raise
 
+    def _receive_raw(self, generation: int, data: bytes) -> None:
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug(
+                "SDK raw input: length=%d prefix=%s", len(data), data[:32].hex(" ")
+            )
+        with self._lock:
+            if generation == self._generation:
+                # The SDK invokes raw and decoded callbacks on the same reader
+                # thread. Keep the wire code that its image-key mapping loses.
+                self._reader_context.packet = (generation, data)
+
     def _receive(self, generation: int, event: Any) -> None:
+        _LOGGER.debug("SDK decoded input: %r", event)
         notifications: tuple[Observer, ...] = ()
         with self._lock:
+            packet = self._reader_context.packet
+            if packet is not None and packet[0] == generation:
+                self._reader_context.packet = None
             if not self._active or generation != self._generation:
+                _LOGGER.debug("Ignoring SDK input before readiness or after close")
                 return
             if event.event_type != self._button:
+                _LOGGER.debug("Ignoring non-button input: %s", event.event_type)
                 return
-            slot = self._keys.get(event.key.value)
+            key = event.key.value
+            if packet is not None and packet[0] == generation:
+                data = packet[1]
+                if (
+                    len(data) >= 11
+                    and data[:3] == b"ACK"
+                    and data[5:7] == b"OK"
+                    and 1 <= data[9] <= 10
+                ):
+                    # N4 Pro regular-button report IDs differ from image IDs.
+                    key = data[9]
+                    _LOGGER.debug(
+                        "N4 Pro button input: report=%d SDK=%d", key, event.key.value
+                    )
+            slot = self._keys.get(key)
             if slot is None:
+                _LOGGER.debug("Ignoring unmapped button: %s", key)
                 return
             if event.state not in (0, 1):
                 self._active = False
@@ -208,6 +265,7 @@ class _Link:
                         self._active = False
                         self._state = State()
                         break
+                    _LOGGER.debug("Recognized input: %s", recognized)
         self._source.notify(notifications)
 
     def _watch(self, generation: int) -> None:
@@ -246,6 +304,7 @@ class _Link:
             self._source.close()
 
     def close(self) -> None:
+        _LOGGER.debug("Closing N4 Pro")
         if threading.current_thread() is self._device.read_thread:
             raise StreamDockError(
                 "Close the connection from its owner, not the SDK callback thread"
@@ -272,6 +331,7 @@ class _Link:
                     errors.append(error)
             if errors:
                 raise ExceptionGroup("StreamDock connection cleanup failed", errors)
+            _LOGGER.debug("N4 Pro closed")
 
     def _close_device(self) -> None:
         errors: list[Exception] = []
@@ -279,6 +339,12 @@ class _Link:
             self._device.set_key_callback(None)
         except Exception as error:
             errors.append(error)
+        if self._raw_registered:
+            try:
+                self._device.set_raw_read_callback(None)
+                self._raw_registered = False
+            except Exception as error:
+                errors.append(error)
         try:
             self._device.close(notify=False)
         except Exception as error:

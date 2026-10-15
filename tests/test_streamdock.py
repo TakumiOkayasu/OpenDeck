@@ -40,6 +40,8 @@ class FakeN4Pro:
         self.product_id = 0x1008
         self.transport = FakeTransport(self)
         self.callback: Callable[[FakeN4Pro, SimpleNamespace], None] | None = None
+        self.raw_callback: Callable[[FakeN4Pro, bytes], None] | None = None
+        self.firmware_version = "fake-firmware"
         self.opened = 0
         self.initialized = 0
         self.closed: list[bool] = []
@@ -57,6 +59,15 @@ class FakeN4Pro:
         self, callback: Callable[[FakeN4Pro, SimpleNamespace], None] | None
     ) -> None:
         self.callback = callback
+
+    def set_raw_read_callback(
+        self, callback: Callable[[FakeN4Pro, bytes], None] | None
+    ) -> None:
+        self.raw_callback = callback
+
+    def emit_raw(self, data: bytes) -> None:
+        if self.raw_callback is not None:
+            self.raw_callback(self, data)
 
     def open(self) -> bool:
         self.opened += 1
@@ -82,6 +93,22 @@ class FakeN4Pro:
     def emit(self, key: int, state: int, event_type: str = "button") -> None:
         if self.callback is not None:
             self.callback(self, event(key, state, event_type))
+
+    def emit_packet(self, code: int, state: int) -> None:
+        self.emit_raw(input_packet(code, state))
+        # Reproduce the SDK's image-map-derived IDs, not the intended input IDs.
+        sdk_key = {
+            1: 11,
+            2: 12,
+            3: 13,
+            4: 14,
+            5: 15,
+            0x40: 11,
+            0x41: 12,
+            0x42: 13,
+            0x43: 14,
+        }.get(code, code)
+        self.emit(sdk_key, int(state == 1))
 
 
 class FakeManager:
@@ -124,6 +151,11 @@ class SleepingHeartbeat:
     def join(self, timeout: float) -> None:
         self.join_timeouts.append(timeout)
         self.alive = False
+
+
+def input_packet(code: int, state: int) -> bytes:
+    header = bytes.fromhex("41 43 4b 00 00 4f 4b 00 00")
+    return header + bytes((code, state)) + bytes(501)
 
 
 def event(key: int, state: int, event_type: str = "button") -> SimpleNamespace:
@@ -238,12 +270,12 @@ class SdkLoadingTests(unittest.TestCase):
 
 
 class StreamDockTests(unittest.TestCase):
-    def make(self, devices=None, *, index=None, chords=()):
+    def make(self, devices=None, *, index=None, chords=(), keys=None):
         devices = [FakeN4Pro()] if devices is None else devices
         sdk = streamdock._Sdk(FakeManager(devices), FakeN4Pro, "button")
         with patch.object(streamdock, "_load", return_value=sdk):
             return StreamDockFactory(
-                {1: Slot("primary"), 2: Slot("secondary")},
+                {1: Slot("primary"), 2: Slot("secondary")} if keys is None else keys,
                 chords,
                 Path("sdk-checkout"),
                 device_index=index,
@@ -306,6 +338,160 @@ class StreamDockTests(unittest.TestCase):
         device.emit(1, 0)
         self.assertEqual(product.input.take(), Slot("primary"))
         self.assertIsNone(product.input.take())
+
+    def test_packet_button_numbers_are_independent_of_sdk_image_mapping(self):
+        for code in range(1, 11):
+            with self.subTest(code=code):
+                device = FakeN4Pro()
+                slot = Slot("pressed")
+                product = self.make([device], keys={code: slot})
+                product.link.open()
+                try:
+                    device.emit_packet(code, 1)
+                    self.assertIsNone(product.input.take())
+                    device.emit_packet(code, 0)
+                    self.assertEqual(product.input.take(), slot)
+                    self.assertIsNone(product.input.take())
+                finally:
+                    product.link.close()
+
+    def test_reported_primary_and_secondary_form_one_chord(self):
+        device = FakeN4Pro()
+        chord = Chord(frozenset({Slot("primary"), Slot("secondary")}), Slot("together"))
+        product = self.make([device], chords=(chord,))
+        product.link.open()
+        self.addCleanup(product.link.close)
+        for code, state in ((1, 1), (2, 1), (2, 0), (1, 0)):
+            device.emit_packet(code, state)
+        self.assertEqual(product.input.take(), Slot("together"))
+        self.assertIsNone(product.input.take())
+
+    def test_touch_release_does_not_release_a_regular_button(self):
+        device = FakeN4Pro()
+        product = self.make([device], keys={1: Slot("primary"), 11: Slot("touch")})
+        product.link.open()
+        self.addCleanup(product.link.close)
+        device.emit_packet(1, 1)
+        device.emit_packet(0x40, 0)
+        self.assertIsNone(product.input.take())
+        device.emit_packet(1, 0)
+        self.assertEqual(product.input.take(), Slot("primary"))
+        self.assertIsNone(product.input.take())
+        device.emit_packet(0x40, 1)
+        device.emit_packet(0x40, 0)
+        self.assertEqual(product.input.take(), Slot("touch"))
+        self.assertIsNone(product.input.take())
+
+    def test_packet_context_is_consumed_by_its_decoded_event(self):
+        device = FakeN4Pro()
+        product = self.make([device])
+        product.link.open()
+        self.addCleanup(product.link.close)
+        device.emit_packet(1, 1)
+        device.emit(2, 1)
+        device.emit(2, 0)
+        self.assertEqual(product.input.take(), Slot("secondary"))
+        device.emit_packet(1, 0)
+        self.assertEqual(product.input.take(), Slot("primary"))
+        self.assertIsNone(product.input.take())
+
+    def test_packet_context_is_local_to_the_sdk_reader_thread(self):
+        device = FakeN4Pro()
+        product = self.make([device])
+        product.link.open()
+        self.addCleanup(product.link.close)
+        device.emit_raw(input_packet(1, 1))
+
+        def other_reader() -> None:
+            device.emit(2, 1)
+            device.emit(2, 0)
+
+        worker = threading.Thread(target=other_reader)
+        worker.start()
+        worker.join(1.0)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(product.input.take(), Slot("secondary"))
+        device.emit(11, 1)
+        device.emit_packet(1, 0)
+        self.assertEqual(product.input.take(), Slot("primary"))
+        self.assertIsNone(product.input.take())
+
+    def test_stale_callbacks_cannot_replace_a_reopened_packet_context(self):
+        device = FakeN4Pro()
+        product = self.make([device])
+        product.link.open()
+        old_raw, old_key = device.raw_callback, device.callback
+        assert old_raw is not None
+        assert old_key is not None
+        product.link.close()
+        product.link.open()
+        self.addCleanup(product.link.close)
+        device.emit_raw(input_packet(1, 1))
+        old_raw(device, input_packet(2, 1))
+        old_key(device, event(12, 1))
+        device.emit(11, 1)
+        device.emit_packet(1, 0)
+        self.assertEqual(product.input.take(), Slot("primary"))
+        self.assertIsNone(product.input.take())
+
+    def test_debug_logging_observes_raw_and_ignored_inputs_without_dispatch(self):
+        device = FakeN4Pro()
+        device.init_events = (event(1, 1), event(1, 0))
+        with self.assertLogs(streamdock._LOGGER, level="DEBUG") as captured:
+            product = self.make([device])
+            product.link.open()
+            try:
+                self.assertIsNotNone(device.raw_callback)
+                device.emit_raw(bytes.fromhex("00 aa 41 43 4b"))
+                device.emit(15, 1)
+                device.emit(15, 0)
+                device.emit(1, 1, "knob")
+                self.assertIsNone(product.input.take())
+                device.emit(1, 1)
+                device.emit(1, 0)
+                self.assertEqual(product.input.take(), Slot("primary"))
+            finally:
+                product.link.close()
+        output = "\n".join(captured.output)
+        self.assertIn("Selected N4 Pro index=0 serial='one'", output)
+        self.assertIn("Opening N4 Pro", output)
+        self.assertIn("SDK open completed; initializing N4 Pro", output)
+        self.assertIn("SDK initialization completed; firmware='fake-firmware'", output)
+        self.assertIn("SDK raw input: length=5 prefix=00 aa 41 43 4b", output)
+        self.assertIn("SDK decoded input:", output)
+        self.assertIn("Ignoring SDK input before readiness or after close", output)
+        self.assertIn("Ignoring unmapped button: 15", output)
+        self.assertIn("Ignoring non-button input: knob", output)
+        self.assertIn("Recognized input: primary", output)
+        self.assertIn("N4 Pro closed", output)
+        self.assertIsNone(device.raw_callback)
+        self.assertIsNone(device.callback)
+
+    def test_raw_input_is_adapted_without_enabling_debug_logging(self):
+        device = FakeN4Pro()
+        with self.assertNoLogs(streamdock._LOGGER, level="WARNING"):
+            product = self.make([device])
+            product.link.open()
+            try:
+                self.assertIsNotNone(device.raw_callback)
+                device.emit_packet(1, 1)
+                device.emit_packet(1, 0)
+                self.assertEqual(product.input.take(), Slot("primary"))
+                self.assertIsNone(product.input.take())
+            finally:
+                product.link.close()
+        self.assertIsNone(device.raw_callback)
+
+    def test_startup_failure_clears_the_debug_raw_callback(self):
+        device = FakeN4Pro()
+        device.init_error = RuntimeError("init failed")
+        with self.assertLogs(streamdock._LOGGER, level="DEBUG"):
+            product = self.make([device])
+            with self.assertRaisesRegex(RuntimeError, "init failed"):
+                product.link.open()
+        self.assertIsNone(device.raw_callback)
+        self.assertIsNone(device.callback)
+        self.assertEqual(device.closed, [False])
 
     def test_overflow_invalidates_recognition_and_late_callbacks_are_ignored(self):
         device = FakeN4Pro()

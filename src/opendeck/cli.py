@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -29,6 +30,7 @@ def _parser() -> argparse.ArgumentParser:
     run = commands.add_parser("run", help="run operations from an N4 Pro")
     run.add_argument("config", type=Path)
     run.add_argument("--device-index", type=int)
+    run.add_argument("--debug", action="store_true", help="log device input to stderr")
     replay = commands.add_parser("replay", help="replay recorded button input")
     replay.add_argument("config", type=Path)
     replay.add_argument("events", type=Path)
@@ -53,6 +55,12 @@ def _execute(product: Product, binding: Binding, live: bool) -> int:
     product.subject.add(wake)
     try:
         product.link.open()
+        if live:
+            print(
+                "opendeck: Waiting for N4 Pro input; press Ctrl+C to exit.",
+                file=sys.stderr,
+                flush=True,
+            )
         wake.on_change()
         while True:
             wake.wait()
@@ -89,7 +97,18 @@ def _error_text(error: BaseException) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    logger = logging.getLogger("opendeck")
+    level, handlers, propagate = logger.level, logger.handlers[:], logger.propagate
+    debug_handler: logging.StreamHandler | None = None
     try:
+        if args.command == "run" and args.debug:
+            debug_handler = logging.StreamHandler(sys.stderr)
+            debug_handler.setFormatter(
+                logging.Formatter("opendeck: %(levelname)s: %(message)s")
+            )
+            logger.setLevel(logging.DEBUG)
+            logger.handlers = [debug_handler]
+            logger.propagate = False
         if args.command == "devices":
             from .adapters.streamdock import list_devices
 
@@ -114,3 +133,9 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, RuntimeError, ImportError, ExceptionGroup) as error:
         print(f"opendeck: {_error_text(error)}", file=sys.stderr)
         return 1
+    finally:
+        if debug_handler is not None:
+            logger.setLevel(level)
+            logger.handlers = handlers
+            logger.propagate = propagate
+            debug_handler.close()
