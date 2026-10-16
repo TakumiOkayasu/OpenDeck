@@ -78,9 +78,13 @@ replayはSDKを読み込まず、記録した入力を同じ認識・割り当�
 - [マクロ実行仕様](docs/requirements/macro.md)
 - [割り当て切替仕様](docs/requirements/contexts.md)
 - [ボタン操作の基本設計](docs/design.md)
+- [音量の基本設計](docs/design/volume.md)
 - [実装設計・SDKの適合・実機確認](docs/implementation.md)
+
+開発エージェントの作業規約と文書の読み順は[AGENTS.md](AGENTS.md)に置く。
 
 ## ライセンス
 
 MIT
+
 SDKは `submodule` 内のライセンスに従う。
