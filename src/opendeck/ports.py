@@ -4,6 +4,10 @@ from typing import Protocol
 from .model import Result, Slot
 
 
+class InputError(RuntimeError):
+    pass
+
+
 class Input[T](Protocol):
     def take(self) -> T | None: ...
 

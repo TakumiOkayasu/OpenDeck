@@ -76,6 +76,15 @@ replayはSDKを読み込まず、記録した入力を同じ認識・割り当�
 外部プラグインの自動探索や、ノブなど値を伴う入力への対応は含めない。
 生成処理の契約と追加箇所は[操作の生成と登録](docs/implementation.md#操作の生成と登録)を参照。
 
+アプリや拡張は、公開された `Input[Slot]` から仮想キーの発生を受け取る。
+物理入力との対応は下位で適合し、操作の割り当ては上位の `Binding` で扱う。
+公開import、責務と追加手順は[アプリケーション・拡張の実装ガイド](docs/extensions.md)を参照。
+SDK・実機・外部アプリの起動を必要としない例も実行できる。
+
+```sh
+uv run python examples/extension.py
+```
+
 ## ドキュメント
 
 各文書は担当する内容の正本とし、同じ仕様を複数のファイルに複製しない。
@@ -88,6 +97,7 @@ replayはSDKを読み込まず、記録した入力を同じ認識・割り当�
 - [ボタン操作の基本設計](docs/design.md)
 - [音量の基本設計](docs/design/volume.md)
 - [実装設計・SDKの適合・実機確認](docs/implementation.md)
+- [アプリケーション・拡張の実装ガイド](docs/extensions.md)
 
 開発エージェントの作業規約と文書の読み順は[AGENTS.md](AGENTS.md)に置く。
 

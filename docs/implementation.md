@@ -19,6 +19,23 @@ Inputの返却型は型引数で定める。理想入力の境界でSlotを返�
 
 Factoryは外部入力を実現する関連製品を作り、Actionは受け取らない。makeの時点では機器を開かず、Linkのopenで接続と初期化を行う。機器の設定とキーコンフィグは組み立て側で別々に渡す。
 
+### アプリケーション・拡張への公開面
+
+[基本設計の仮想キー契約](design.md#理想入力とキーコンフィグ)は、既存のSlotで具体化する。
+Slotは `NewType("Slot", str)` で識別を区別し、今回の設定では空や重複のない名前を上位が宣言する。
+アプリ・拡張へ渡すのは `Input[Slot]` と必要な能力であり、SDKのキー番号や認識状態ではない。
+Slotと別の仮想キー型や、機器の番号に依存する固定コード一覧を今回追加しない。
+
+[パッケージルート](../src/opendeck/__init__.py)から、Slot、Chord、Input、Subject、Observer、
+Binding、Action、Result、Status、InputErrorを公開する。
+これらは既存の型そのもので、別の型や中継オブジェクトで包まない。
+import時はmodel・ports・bindingsだけを読み込み、設定処理、入力実装、SDKやOSアダプタを読み込まない。
+Inputは引き続き型引数で取得する値を定める汎用契約であり、この公開面でもSlotに固定しない。
+
+入力取得のInputErrorはportsで定義する契約上の例外とし、Sourceも同じ例外を使う。
+利用側は具体的なSourceを参照せずに、取得失敗と空を識別できる。
+利用手順は[アプリケーション・拡張の実装ガイド](extensions.md)に置く。
+
 ## 今回の設定形式
 
 設定ファイルにはJSONを使う。ファイルの読み込みとJSONの解析は組み立て側で行い、読み込み済みの値を[config.py](../src/opendeck/config.py)のparseへ渡す。parseは操作種別から生成処理への対応表を受け、操作を実行・照会せずに設定を検証し、関連オブジェクトを構成する。未知の項目や参照先を勝手に補完しない。
@@ -116,8 +133,9 @@ Sourceは失敗を保持し、takeはInputErrorを送出する。単に入力が
 
 | ファイル | 責務 |
 | --- | --- |
+| [`__init__.py`](../src/opendeck/__init__.py) | アプリ・拡張向け契約の公開 |
 | [model.py](../src/opendeck/model.py) | 上位の理想入力と組合せの定義、共通の実行結果 |
-| [ports.py](../src/opendeck/ports.py) | 交換する能力と関連製品の契約 |
+| [ports.py](../src/opendeck/ports.py) | 交換する能力、入力取得失敗と関連製品の契約 |
 | [bindings.py](../src/opendeck/bindings.py) | 不変のキーコンフィグから操作を選ぶ純粋な処理 |
 | [runtime.py](../src/opendeck/runtime.py) | 起床と、未処理入力を選択・実行へ渡す協調 |
 | [recognition.py](../src/opendeck/recognition.py) | 入力実現側で使う非公開状態の純粋な遷移と適合能力の検証。割り当て適用側では使わない |

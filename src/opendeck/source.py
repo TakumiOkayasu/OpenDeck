@@ -1,11 +1,7 @@
 from collections import deque
 from threading import Lock
 
-from .ports import Observer
-
-
-class InputError(RuntimeError):
-    pass
+from .ports import InputError, Observer
 
 
 class Source[T]:
