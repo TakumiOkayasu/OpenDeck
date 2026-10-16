@@ -1,12 +1,13 @@
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import cast
 
 from .bindings import Binding
-from .launch import Launch, Start
 from .model import Chord, Slot
 from .ports import Action
+
+type Builder = Callable[[Mapping[str, object]], Action]
 
 
 class ConfigError(ValueError):
@@ -86,27 +87,33 @@ def _keys(value: object, inputs: tuple[Slot, ...]) -> Mapping[int, Slot]:
     return MappingProxyType(result)
 
 
-def _actions(value: object, target: Start) -> Mapping[str, Action]:
+def _build(value: object, builders: Mapping[str, Builder], location: str) -> Action:
+    record = _mapping(value, location)
+    kind = record.get("kind")
+    if not isinstance(kind, str) or not kind.strip():
+        raise ConfigError(f"{location}: expected a nonempty kind")
+    builder = builders.get(kind)
+    if builder is None:
+        raise ConfigError(f"{location}: unknown kind {kind!r}")
+    options = MappingProxyType(
+        {key: value for key, value in record.items() if key != "kind"}
+    )
+    try:
+        return builder(options)
+    except ValueError as error:
+        raise ConfigError(f"{location}: {error}") from error
+
+
+def _actions(value: object, builders: Mapping[str, Builder]) -> Mapping[str, Action]:
     result: dict[str, Action] = {}
     for name, definition in _mapping(value, "actions").items():
         if not name.strip():
             raise ConfigError("actions: action names must be nonempty")
-        record = _record(definition, {"kind", "argv"}, f"actions[{name}]")
-        if record["kind"] != "launch":
-            raise ConfigError(f"actions[{name}]: unknown kind {record['kind']!r}")
-        argv = record["argv"]
-        if (
-            not isinstance(argv, list)
-            or not argv
-            or any(not isinstance(arg, str) or "\0" in arg for arg in argv)
-            or not argv[0]
-        ):
-            raise ConfigError(f"actions[{name}]: expected a nonempty argument list")
-        result[name] = Launch(tuple(argv), target)
+        result[name] = _build(definition, builders, f"actions[{name}]")
     return MappingProxyType(result)
 
 
-def parse(value: object, target: Start) -> Settings:
+def parse(value: object, builders: Mapping[str, Builder]) -> Settings:
     record = _record(
         value, {"inputs", "chords", "device", "actions", "bindings"}, "config"
     )
@@ -114,7 +121,7 @@ def parse(value: object, target: Start) -> Settings:
     chords = _chords(record["chords"], inputs)
     device = _record(record["device"], {"keys"}, "device")
     keys = _keys(device["keys"], inputs)
-    actions = _actions(record["actions"], target)
+    actions = _actions(record["actions"], builders)
     mapping: dict[Slot, Action] = {}
     for name, value in _mapping(record["bindings"], "bindings").items():
         slot = _slot(name, inputs, "bindings")

@@ -8,6 +8,7 @@ from .adapters.process import Processes
 from .adapters.replay import ReplayFactory, parse_events
 from .bindings import Binding
 from .config import parse
+from .launch import LaunchBuilder
 from .model import Result, Slot, Status
 from .ports import Factory, Product
 from .runtime import Wake, drain
@@ -115,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
             for device in list_devices(args.sdk_dir):
                 print(device)
             return 0
-        settings = parse(_read(args.config), Processes())
+        settings = parse(_read(args.config), {"launch": LaunchBuilder(Processes())})
         factory: Factory
         if args.command == "replay":
             factory = ReplayFactory(

@@ -21,15 +21,18 @@ Factoryは外部入力を実現する関連製品を作り、Actionは受け取�
 
 ## 今回の設定形式
 
-設定ファイルにはJSONを使う。ファイルの読み込みとJSONの解析は組み立て側で行い、読み込み済みの値を[config.py](../src/opendeck/config.py)のparseへ渡す。parseは構成済みのStart参照を受け、操作を実行・照会せずに設定を検証し、関連オブジェクトを構成する。未知の項目や参照先を勝手に補完しない。
+設定ファイルにはJSONを使う。ファイルの読み込みとJSONの解析は組み立て側で行い、読み込み済みの値を[config.py](../src/opendeck/config.py)のparseへ渡す。parseは操作種別から生成処理への対応表を受け、操作を実行・照会せずに設定を検証し、関連オブジェクトを構成する。未知の項目や参照先を勝手に補完しない。
 
 | 項目 | 今回の表現 |
 | --- | --- |
 | inputs | 機器から独立したSlot名の一覧。空や重複を認めない |
 | chords | inputsにある複数Slot名と、成立時に出力する別のSlot名。同じメンバー集合の重複を認めない |
 | device.keys | 物理入力識別子の文字列からSlot名への対応。範囲は1から15。複数キーを同じ基底Slotに適合させない |
-| actions | 名前から操作定義への対応。今回のkindはlaunchだけを受け付け、argvに空でない引数列を指定する |
+| actions | 名前から操作定義への対応。kindで登録済みの生成処理を選ぶ |
 | bindings | Slot名からactionsにある操作名への対応。未割り当てのSlotを残せる |
+
+actionsのkind以外の項目は、選んだ操作の生成処理が検証する。
+標準CLIはlaunchを登録し、`argv` に空でない引数列を指定する。
 
 これら5項目は必須で、利用しないchordsは空の一覧にする。上位のinputs・chords・bindingsと、下位のdevice.keysを同じJSONファイルに保存しても、構成後の責務と参照範囲は分ける。起動後の設定変更と保存画面は実装しない。
 
@@ -39,6 +42,31 @@ Factoryは外部入力を実現する関連製品を作り、Actionは受け取�
 各物理入力を異なる基底Slotへ対応付け、同時押しの全メンバーが直接適合した基底Slotであることを要求する。
 複数の物理入力を同じSlotへ対応付ける定義や、未適合Slotをメンバーに含む定義は接続開始前に拒否する。組合せの出力を別の組合せへ再合成するnested chordは今回の認識方式では実現しない。
 この制約は下位実装の適合能力として扱い、上位の理想入力定義を制限する共通要件にはしない。
+
+## 操作の生成と登録
+
+操作の構成境界は[基本設計](design.md#操作の追加と構成)に従う。
+[config.py](../src/opendeck/config.py)のBuilderは、`Mapping[str, object]` を受けてActionを返すcallableの型とする。
+parseの第2引数は `Mapping[str, Builder]` とし、共通の設定処理は起動操作やOS実装をimportしない。
+以前のStart参照を直接渡すPython呼び出しは、`{"launch": LaunchBuilder(target)}` を渡す形へ変更する。既存のJSON設定とCLIの引数は変更しない。
+
+共通処理は操作名、操作定義の構造、空でない文字列のkindと登録の有無を検証する。
+選ばれた生成処理にはkindを除いた操作固有の項目だけを、読み取り専用のMappingで渡す。
+入力定義、物理キー、Binding、他の操作や汎用の依存オブジェクト一覧は渡さない。
+Mapping内のリストなどまで不変にはしないため、生成処理は設定を変更せず、実行に保持する値を自身の契約に従ってコピー・確定する。
+
+生成処理は機能固有の必須項目、未知の項目と値を検証し、不正ならValueErrorを送出する。
+共通処理はその例外を原因に保持し、`actions[操作名]` の位置を付けたConfigErrorとして報告する。
+それ以外の実装上の例外を設定不備や操作の実行結果へ置き換えない。
+未登録のkindを暗黙に補完したり、外部モジュール名として読み込んだりしない。
+
+[launch.py](../src/opendeck/launch.py)のLaunchBuilderはStart参照だけを受け取り、argvの検証と不変の引数列を持つLaunchの構成を担当する。
+[cli.py](../src/opendeck/cli.py)で `{"launch": LaunchBuilder(Processes())}` を明示的に登録する。
+追加する操作もActionを実装し、その設定を検証する生成処理に必要な対象の能力を渡して、この対応表へ登録する。
+設定された各操作は構成時に一度生成し、複数のSlotが同じ操作名を参照した場合は同じActionを共有する。runは入力の発生ごとに呼ぶ。
+外部パッケージの自動探索、実行中の登録変更、値を伴う入力の追加は今回実装しない。
+
+登録した独自操作を、既存の再生入力・割り当て・実行へ接続する検証例は[test_extensions.py](../tests/test_extensions.py)に置く。
 
 ## キーコンフィグと操作
 
@@ -94,11 +122,12 @@ Sourceは失敗を保持し、takeはInputErrorを送出する。単に入力が
 | [runtime.py](../src/opendeck/runtime.py) | 起床と、未処理入力を選択・実行へ渡す協調 |
 | [recognition.py](../src/opendeck/recognition.py) | 入力実現側で使う非公開状態の純粋な遷移と適合能力の検証。割り当て適用側では使わない |
 | [source.py](../src/opendeck/source.py) | 未処理入力の保持・消費・到着通知 |
-| [launch.py](../src/opendeck/launch.py) | 起動操作の構成と、Startへの実行依頼 |
+| [launch.py](../src/opendeck/launch.py) | 起動固有の設定検証・操作生成と、Startへの実行依頼 |
 | [adapters/process.py](../src/opendeck/adapters/process.py) | OSのプロセス生成へ適合するStart実装 |
 | [adapters/streamdock.py](../src/opendeck/adapters/streamdock.py) | SDKへの接続と、SDKのBUTTON入力から理想入力への適合 |
 | [adapters/replay.py](../src/opendeck/adapters/replay.py) | 記録済みイベントから同じ理想入力を実現する別のFactory |
-| [config.py](../src/opendeck/config.py) / [cli.py](../src/opendeck/cli.py) | 設定値の検証・構成と、CLIでの資源所有・組み立て |
+| [config.py](../src/opendeck/config.py) | 共通設定の検証、登録された生成処理への委譲、関連オブジェクトの構成 |
+| [cli.py](../src/opendeck/cli.py) | 操作の生成処理の登録、CLIでの資源所有・組み立て |
 
 ファイル数を層数とみなさない。recognitionは純粋であっても、実際の押下・解放を扱う入力実現側の処理である。SlotからActionへの選択、Actionの実行にはその状態を持ち込まない。
 
@@ -174,10 +203,10 @@ SDKのreader、heartbeat、独自の監視threadが停止したことを確認�
 
 ## 検証の区分
 
-外部依存なしで、入力認識の状態遷移、単独・同時押しの排他、重複イベント、FIFO配送、起床と取り出し、未割り当て、実行結果、切断後の入力無効化を検証する。接続のテストにはfake機器を使い、SDKのopen失敗、初期化例外、切断、終了を区別する。
+外部依存なしで、入力認識の状態遷移、単独・同時押しの排他、重複イベント、FIFO配送、起床と取り出し、未割り当て、実行結果、切断後の入力無効化を検証する。操作の生成境界は、独自のkindの登録、起動操作との併用、機能固有の設定不備、構成時の副作用がないこと、同じActionの反復実行と失敗・結果不明時の非再実行をSDKなしで検証する。接続のテストにはfake機器を使い、SDKのopen失敗、初期化例外、切断、終了を区別する。
 
 ユーザーのWindows実機ログでは、上記firmwareのN4 Proの接続・初期化と通常ボタンの入力パケット取得を確認している。
-補正後の入力から単独・同時押しの認識、アプリ起動までの一連の動作は実機で未確認であり、全面的な動作保証ではない。
+補正後の実機ログでは、通常ボタン1の解放からprimaryの認識と起動操作のdone（プロセスIDの返却）、通常ボタン2からsecondaryの認識とunassignedを確認した。これは単独入力からプロセス生成までの確認であり、起動したGUIの準備完了や同時押しの実機動作を確認したものではない。
 **macOSでの実機動作も未確認**。再生入力やfake機器のテスト成功を、SDK/native libraryや機器本体の適合確認に置き換えない。
 
 実機では通常キーと副画面入力の識別と通知列の違い、複数保持、押下順と解放順、長押し時の重複、通知欠落、抜き差し、初期化による表示への影響、純正ソフトとの同時利用可否を確認する。失敗時に操作が重複実行されないこと、終了後にreaderや監視が残らないこと、機器を再び開けることも確認する。
