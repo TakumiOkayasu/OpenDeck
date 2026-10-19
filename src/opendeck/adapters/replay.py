@@ -1,11 +1,13 @@
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from time import monotonic
 from types import MappingProxyType
 
 from ..model import Chord, Slot
-from ..ports import Product
-from ..recognition import State, apply, validate_adaptation
+from ..ports import ButtonProduct, Product
+from ..recognition import validate_adaptation
 from ..source import Source
+from .inputs import Panel, Receiver, Signals
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,32 +36,31 @@ def parse_events(value: object) -> tuple[Edge, ...]:
 class Replay:
     def __init__(
         self,
-        source: Source[Slot],
+        receiver: Receiver,
         keys: Mapping[int, Slot],
-        chords: tuple[Chord, ...],
         events: tuple[Edge, ...],
     ) -> None:
-        self._source = source
+        self._receiver = receiver
         self._keys = dict(keys)
-        self._chords = chords
         self._events = events
-        self._state = State()
 
     def open(self) -> None:
-        self._source.start()
-        self._state = State()
+        self._receiver.start()
         for edge in self._events:
             slot = self._keys.get(edge.key)
             if slot is None:
                 continue
-            self._state, signals = apply(self._state, slot, edge.pressed, self._chords)
-            for signal in signals:
-                if not self._source.publish(signal):
-                    return
+            try:
+                accepted, observers = self._receiver.receive(slot, edge.pressed)
+            except Exception as error:
+                Source.notify(self._receiver.record_failure(error))
+                raise
+            Source.notify(observers)
+            if not accepted:
+                return
 
     def close(self) -> None:
-        self._source.close()
-        self._state = State()
+        Source.notify(self._receiver.close())
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,5 +79,11 @@ class ReplayFactory:
 
     def make(self) -> Product:
         source = Source[Slot](capacity=max(1, len(self.events)))
-        link = Replay(source, self.keys, self.chords, self.events)
+        link = Replay(Signals(source, self.chords), self.keys, self.events)
         return Product(link, source, source)
+
+    def make_buttons(self, *, clock: Callable[[], float] = monotonic) -> ButtonProduct:
+        panel = Panel(
+            self.keys.values(), self.chords, clock, capacity=max(1, len(self.events))
+        )
+        return ButtonProduct(Replay(panel, self.keys, self.events), panel.buttons)

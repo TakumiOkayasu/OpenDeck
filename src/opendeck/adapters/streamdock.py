@@ -3,15 +3,17 @@ import logging
 import sys
 import threading
 import warnings
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 from ..model import Chord, Slot
-from ..ports import Observer, Product
-from ..recognition import State, apply, validate_adaptation
+from ..ports import ButtonProduct, Observer, Product
+from ..recognition import validate_adaptation
 from ..source import Source
+from .inputs import Panel, Receiver, Signals
 
 _LOGGER = logging.getLogger(__name__)
 _POLL_INTERVAL = 0.5
@@ -109,6 +111,17 @@ class StreamDockFactory:
         self._device_index = device_index
 
     def make(self) -> Product:
+        device, button = self._select()
+        source = Source[Slot]()
+        link = _Link(device, button, self._keys, Signals(source, self._chords))
+        return Product(link, source, source)
+
+    def make_buttons(self, *, clock: Callable[[], float] = monotonic) -> ButtonProduct:
+        panel = Panel(self._keys.values(), self._chords, clock)
+        device, button = self._select()
+        return ButtonProduct(_Link(device, button, self._keys, panel), panel.buttons)
+
+    def _select(self) -> tuple[Any, Any]:
         sdk = _load(self._sdk_path)
         devices = _devices(sdk)
         if not devices:
@@ -126,9 +139,7 @@ class StreamDockFactory:
         _LOGGER.debug(
             "Selected N4 Pro index=%d serial=%r", index, device.get_serial_number()
         )
-        source = Source[Slot]()
-        link = _Link(device, sdk.button, self._keys, self._chords, source)
-        return Product(link, source, source)
+        return device, sdk.button
 
 
 class _Link:
@@ -137,15 +148,12 @@ class _Link:
         device: Any,
         button: Any,
         keys: Mapping[int, Slot],
-        chords: tuple[Chord, ...],
-        source: Source[Slot],
+        receiver: Receiver,
     ):
         self._device = device
         self._button = button
         self._keys = keys
-        self._chords = chords
-        self._source = source
-        self._state = State()
+        self._receiver = receiver
         self._lock = threading.RLock()
         self._lifecycle = threading.Lock()
         self._stop = threading.Event()
@@ -157,54 +165,57 @@ class _Link:
         self._reader_context = _ReaderContext()
 
     def open(self) -> None:
-        with self._lifecycle:
-            if self._opened:
-                raise StreamDockError("Connection is already open")
-            with self._lock:
-                self._generation += 1
-                generation = self._generation
-                self._state = State()
-            try:
-                self._device.set_key_callback(
-                    lambda device, event: self._receive(generation, event)
-                )
-                self._device.set_raw_read_callback(
-                    lambda device, data: self._receive_raw(generation, data)
-                )
-                self._raw_registered = True
-                _LOGGER.debug("Opening N4 Pro")
-                if not self._device.open():
-                    raise StreamDockError("SDK could not open the selected N4 Pro")
-                _LOGGER.debug("SDK open completed; initializing N4 Pro")
-                self._device.init()
-                _LOGGER.debug(
-                    "SDK initialization completed; firmware=%r",
-                    self._device.firmware_version,
-                )
+        notifications: tuple[Observer, ...] = ()
+        try:
+            with self._lifecycle:
+                if self._opened:
+                    raise StreamDockError("Connection is already open")
                 with self._lock:
-                    self._source.start()
-                    self._active = True
-                    self._opened = True
-                self._stop.clear()
-                self._monitor = threading.Thread(
-                    target=self._watch,
-                    args=(generation,),
-                    daemon=True,
-                    name="streamdock-presence",
-                )
-                self._monitor.start()
-            except Exception as error:
-                self._invalidate()
-                self._stop.set()
+                    self._generation += 1
+                    generation = self._generation
                 try:
-                    self._close_device()
-                except Exception as cleanup_error:
-                    raise ExceptionGroup(
-                        "SDK startup and cleanup failed", [error, cleanup_error]
-                    ) from None
-                self._opened = False
-                self._monitor = None
-                raise
+                    self._device.set_key_callback(
+                        lambda device, event: self._receive(generation, event)
+                    )
+                    self._device.set_raw_read_callback(
+                        lambda device, data: self._receive_raw(generation, data)
+                    )
+                    self._raw_registered = True
+                    _LOGGER.debug("Opening N4 Pro")
+                    if not self._device.open():
+                        raise StreamDockError("SDK could not open the selected N4 Pro")
+                    _LOGGER.debug("SDK open completed; initializing N4 Pro")
+                    self._device.init()
+                    _LOGGER.debug(
+                        "SDK initialization completed; firmware=%r",
+                        self._device.firmware_version,
+                    )
+                    with self._lock:
+                        self._receiver.start()
+                        self._active = True
+                        self._opened = True
+                    self._stop.clear()
+                    self._monitor = threading.Thread(
+                        target=self._watch,
+                        args=(generation,),
+                        daemon=True,
+                        name="streamdock-presence",
+                    )
+                    self._monitor.start()
+                except Exception as error:
+                    notifications = self._invalidate(error)
+                    self._stop.set()
+                    try:
+                        self._close_device()
+                    except Exception as cleanup_error:
+                        raise ExceptionGroup(
+                            "SDK startup and cleanup failed", [error, cleanup_error]
+                        ) from None
+                    self._opened = False
+                    self._monitor = None
+                    raise
+        finally:
+            Source.notify(notifications)
 
     def _receive_raw(self, generation: int, data: bytes) -> None:
         if _LOGGER.isEnabledFor(logging.DEBUG):
@@ -250,23 +261,20 @@ class _Link:
                 return
             if event.state not in (0, 1):
                 self._active = False
-                self._state = State()
-                notifications = self._source.record_failure(
+                notifications = self._receiver.record_failure(
                     StreamDockError("SDK supplied an invalid button state")
                 )
             else:
-                self._state, slots = apply(
-                    self._state, slot, event.state == 1, self._chords
-                )
-                for recognized in slots:
-                    accepted, observers = self._source.enqueue(recognized)
-                    notifications += observers
+                try:
+                    accepted, notifications = self._receiver.receive(
+                        slot, event.state == 1
+                    )
                     if not accepted:
                         self._active = False
-                        self._state = State()
-                        break
-                    _LOGGER.debug("Recognized input: %s", recognized)
-        self._source.notify(notifications)
+                except Exception as error:
+                    self._active = False
+                    notifications = self._receiver.record_failure(error)
+        Source.notify(notifications)
 
     def _watch(self, generation: int) -> None:
         while not self._stop.wait(_POLL_INTERVAL):
@@ -292,46 +300,48 @@ class _Link:
             if not self._active or generation != self._generation:
                 return
             self._active = False
-            self._state = State()
-            observers = self._source.record_failure(error)
-        self._source.notify(observers)
+            observers = self._receiver.record_failure(error)
+        Source.notify(observers)
 
-    def _invalidate(self) -> None:
+    def _invalidate(self, error: Exception | None = None) -> tuple[Observer, ...]:
         with self._lock:
             self._active = False
             self._generation += 1
-            self._state = State()
-            self._source.close()
+            return self._receiver.close(error)
 
     def close(self) -> None:
-        _LOGGER.debug("Closing N4 Pro")
-        if threading.current_thread() is self._device.read_thread:
-            raise StreamDockError(
-                "Close the connection from its owner, not the SDK callback thread"
-            )
-        with self._lifecycle:
-            self._invalidate()
-            self._stop.set()
-            errors: list[Exception] = []
-            if (
-                self._monitor is not None
-                and self._monitor.ident is not None
-                and self._monitor is not threading.current_thread()
-            ):
-                self._monitor.join(_JOIN_TIMEOUT)
-                if self._monitor.is_alive():
-                    errors.append(
-                        StreamDockError("Device presence thread did not stop")
-                    )
-            if self._opened:
-                self._opened = False
-                try:
-                    self._close_device()
-                except Exception as error:
-                    errors.append(error)
-            if errors:
-                raise ExceptionGroup("StreamDock connection cleanup failed", errors)
-            _LOGGER.debug("N4 Pro closed")
+        notifications: tuple[Observer, ...] = ()
+        try:
+            _LOGGER.debug("Closing N4 Pro")
+            if threading.current_thread() is self._device.read_thread:
+                raise StreamDockError(
+                    "Close the connection from its owner, not the SDK callback thread"
+                )
+            with self._lifecycle:
+                notifications = self._invalidate()
+                self._stop.set()
+                errors: list[Exception] = []
+                if (
+                    self._monitor is not None
+                    and self._monitor.ident is not None
+                    and self._monitor is not threading.current_thread()
+                ):
+                    self._monitor.join(_JOIN_TIMEOUT)
+                    if self._monitor.is_alive():
+                        errors.append(
+                            StreamDockError("Device presence thread did not stop")
+                        )
+                if self._opened:
+                    self._opened = False
+                    try:
+                        self._close_device()
+                    except Exception as error:
+                        errors.append(error)
+                if errors:
+                    raise ExceptionGroup("StreamDock connection cleanup failed", errors)
+                _LOGGER.debug("N4 Pro closed")
+        finally:
+            Source.notify(notifications)
 
     def _close_device(self) -> None:
         errors: list[Exception] = []

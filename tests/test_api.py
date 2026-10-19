@@ -136,7 +136,8 @@ def test_public_contract_import_does_not_load_implementations_or_sdk():
             "-c",
             "import sys\n"
             "from opendeck import (Action, Binding, Chord, Input, InputError, "
-            "Observer, Result, Slot, Status, Subject)\n"
+            "Observer, Result, Slot, Status, Subject, Button, ButtonFactory, "
+            "ButtonProduct, Change, Read)\n"
             "assert not any(name.startswith(('opendeck.adapters', 'StreamDock')) "
             "for name in sys.modules)\n"
             "assert not {'opendeck.cli', 'opendeck.config', 'opendeck.launch', "
@@ -173,4 +174,34 @@ def test_extension_example_runs_without_sdk_or_launching_applications():
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == ["primary: done", "recorded by extension"]
+    assert result.stderr == ""
+
+
+def test_button_example_runs_without_sdk_or_launching_applications():
+    example = Path(__file__).resolve().parents[1] / "examples" / "button_state.py"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import runpy, sys\n"
+            "def guard(event, args):\n"
+            "    if event == 'subprocess.Popen':\n"
+            "        raise AssertionError('example must not launch applications')\n"
+            "    if event == 'import' and args[0].startswith('StreamDock'):\n"
+            "        raise AssertionError('example must not import the SDK')\n"
+            "sys.addaudithook(guard)\n"
+            "runpy.run_path(sys.argv[1], run_name='__main__')\n",
+            str(example),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "pressed=True at=1.0",
+        "pressed=False at=2.0",
+        "current=False",
+    ]
     assert result.stderr == ""

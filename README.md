@@ -85,6 +85,14 @@ SDK・実機・外部アプリの起動を必要としない例も実行でき�
 uv run python examples/extension.py
 ```
 
+ボタンの開始・終了と現在の継続状態を使う拡張には、別のButton能力を提供する。
+短押し・長押しの判定は拡張側で行う。既存の単発入力と標準CLIの動作は維持する。
+[利用方法](docs/extensions.md#ボタンの継続と終了を利用する)と、実機を必要としない例:
+
+```sh
+uv run python examples/button_state.py
+```
+
 ## ドキュメント
 
 各文書は担当する内容の正本とし、同じ仕様を複数のファイルに複製しない。
@@ -95,6 +103,8 @@ uv run python examples/extension.py
 - [マクロ実行仕様](docs/requirements/macro.md)
 - [割り当て切替仕様](docs/requirements/contexts.md)
 - [ボタン操作の基本設計](docs/design.md)
+- [ボタン入力の要件](docs/requirements/buttons.md)
+- [ボタン能力の基本設計](docs/design/buttons.md)
 - [音量の基本設計](docs/design/volume.md)
 - [実装設計・SDKの適合・実機確認](docs/implementation.md)
 - [アプリケーション・拡張の実装ガイド](docs/extensions.md)

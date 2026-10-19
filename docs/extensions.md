@@ -112,11 +112,35 @@ SDKのcallback内でBindingを適用したり、Actionを実行したりしな�
 [整合性の規約](design.md#整合性の規約)と
 [未処理入力と通知](implementation.md#未処理入力と通知)を満たす。
 
+## ボタンの継続と終了を利用する
+
+開始・終了の両方が必要な拡張には、公開されたButtonを渡す。
+現在状態だけならRead[bool]、履歴だけならInput[Change]、通知の接続だけならSubjectを渡せる。
+意味と整合条件は[ボタン能力の基本設計](design/buttons.md)、時点と取得方式は
+[詳細設計](implementation.md#ボタンの開始継続終了)を参照する。
+
+組み立て側はReplayFactoryまたはStreamDockFactoryのmake_buttonsを呼び、
+戻り値のbuttonsからSlotで選んだButtonだけを拡張へ渡す。接続の開始・解放は組み立て側が所有する。
+Buttonの取得側は一つとする。同じ変化を複数の拡張へ渡す場合は、上位の配送側が一度取得して配る。
+通知では処理を予約し、SDKのcallback内で拡張の処理を実行しない。
+
+readは現在押されているか、takeは変化後の状態と時点を返す。
+過去の開始をtakeした時点で、現在状態は既に終了している場合がある。
+短押し・長押しの条件、タイマー、操作との対応は具体的な拡張側が所有する。
+基盤の固定閾値や、短押し・長押しに分類済みの入力は提供しない。
+
+[examples/button_state.py](../examples/button_state.py)は、実機・SDKなしで
+開始・終了と現在状態を別々に受け取る例である。
+
+```sh
+uv run python examples/button_state.py
+```
+
 ## このガイドの範囲外
 
 公開importは永久的なABI互換を約束するものではない。
 自動プラグイン探索、完全なプラグインローダー、sandboxは提供しない。
-値を伴う入力、ノブ、表示、動的コンテキストの契約・実装は、この公開面では提供しない。
+回転量などの入力、ノブ、表示、動的コンテキストの契約・実装は、この公開面では提供しない。
 未確定事項を独自の共通数値やSlotのpayloadとして確定させず、
 [設計の範囲](design.md#到達点と範囲)と
 [今回の実装範囲](implementation.md#今回の実装範囲)を参照する。

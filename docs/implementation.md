@@ -129,6 +129,47 @@ Sourceは失敗を保持し、takeはInputErrorを送出する。単に入力が
 
 待ち行列は理想入力の未処理分を保持するために置く。責務境界が増えるたびに追加の待ち行列を置かず、今回Action用の配送待ち行列も追加しない。
 
+## ボタンの開始・継続・終了
+
+契約と整合条件は[ボタン能力の基本設計](design/buttons.md)を正本とする。
+汎用のRead[T]はreadでTを返し、Input[T]はtakeで未処理項目を取得する。
+ButtonはRead[bool]、Input[Change]、Subjectを合成し、readは最新の押下状態、
+takeは次の開始・終了、add/removeはObserverとの対応を扱う。
+開始前のreadはInputError、takeは空となる。readがboolを返すのはButtonの契約によるもので、
+汎用Readの返却型を固定するものではない。
+
+StreamDockFactoryとReplayFactoryは、make_buttonsでLinkとSlot別Buttonの集合を返す。
+集合は変更できない。生成時は外部との接続を開始しない。
+同じ接続についてmakeとmake_buttonsを同時に開かず、必要な製品群を選ぶ。
+標準CLIのmake経路とJSON形式は維持し、ボタン能力は拡張を組み立てるアプリから利用する。
+
+取得・接続の処理はReceiverへ適合済みのSlotと押下状態を渡す。
+既存の単発入力はSignalsが従来のrecognition.applyを利用し、
+Buttonの経路はPanelがButton別の状態と履歴を共有ロックで管理する。
+同時押しの保持状態を求めるholdは、取得済みの不変状態と引数だけで計算する純粋関数。
+機器番号、パケット補正やSDKのイベント分類はStreamDockアダプタに残す。
+
+Changeはpressedとatを持つ不変値とする。atはホストが適合済みの変化を受理する際の
+time.monotonicによる秒であり、絶対日時や機器内の発生時刻ではない。
+同じ受信で変わる個別Buttonと組合せButtonには同じ時点を付ける。
+clock引数で、同じ単位の単調な時計を組み立て時に差し替えられる。
+時計の取得に失敗した場合も、全Buttonを取得失敗として無効にする。
+実行側の処理遅延を継続時間へ加算しないよう、時点は履歴を取り出す時に採取しない。
+replayは待機時間を再現しない。既定の時計による差分は元の記録の保持時間を表さない。
+
+履歴には既存のSource[Change]を再利用し、liveでは各Buttonに256件の上限を設ける。
+replayでは各Buttonの容量をmax(1, len(events))とする。
+構成された各Buttonを配送し、利用しない履歴を蓄積し続けない。
+容量超過はそのButtonだけに閉じず、全Buttonの状態と未処理履歴を無効にする。
+切断・close・取得失敗後のreadとtakeはInputErrorとなり、偽のリリースは配送しない。
+失敗後のcloseで元の診断を上書きせず、次のopenで初期化する。
+再接続を所有するアプリは、拡張側の継続処理も新しい接続として開始し直す。
+
+SDKの受信ロック、状態の共有ロック、Sourceのロックを解放してからObserverへ通知する。
+closeや開始失敗の通知も、接続ライフサイクルのロックを解放した後に行う。
+拡張の操作や時間判定をSDKのcallbackで実行しない。
+新しい能力はreplayとfake機器で検証し、N4 ProとmacOSの実機での確認は別途必要とする。
+
 ## コードの配置と利用範囲
 
 | ファイル | 責務 |
@@ -143,6 +184,7 @@ Sourceは失敗を保持し、takeはInputErrorを送出する。単に入力が
 | [launch.py](../src/opendeck/launch.py) | 起動固有の設定検証・操作生成と、Startへの実行依頼 |
 | [adapters/process.py](../src/opendeck/adapters/process.py) | OSのプロセス生成へ適合するStart実装 |
 | [adapters/streamdock.py](../src/opendeck/adapters/streamdock.py) | SDKへの接続と、SDKのBUTTON入力から理想入力への適合 |
+| [adapters/inputs.py](../src/opendeck/adapters/inputs.py) | 適合済み入力の単発認識、ボタンの継続状態と配送への具体化 |
 | [adapters/replay.py](../src/opendeck/adapters/replay.py) | 記録済みイベントから同じ理想入力を実現する別のFactory |
 | [config.py](../src/opendeck/config.py) | 共通設定の検証、登録された生成処理への委譲、関連オブジェクトの構成 |
 | [cli.py](../src/opendeck/cli.py) | 操作の生成処理の登録、CLIでの資源所有・組み立て |

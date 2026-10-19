@@ -6,6 +6,12 @@ Slot = NewType("Slot", str)
 
 
 @dataclass(frozen=True, slots=True)
+class Change:
+    pressed: bool
+    at: float
+
+
+@dataclass(frozen=True, slots=True)
 class Chord:
     members: frozenset[Slot]
     slot: Slot
