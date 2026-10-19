@@ -27,3 +27,53 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pytest
       - run: uv run opendeck --help
+      - name: Build and test the standalone C++ core
+        run: |
+          cmake -S . -B build/core -DOPENDECK_BUILD_PYTHON=OFF
+          cmake --build build/core --config Debug --parallel 2
+          ctest --test-dir build/core -C Debug --output-on-failure
+      - name: Build source and wheel distributions
+        run: uv build
+      - name: Verify the sdist and install the wheel in isolation
+        shell: bash
+        run: |
+          uv run --no-project python - <<'PY'
+          import os
+          import subprocess
+          import tarfile
+          from pathlib import Path
+
+          root = Path.cwd()
+          sdist, = (root / "dist").glob("*.tar.gz")
+          with tarfile.open(sdist) as archive:
+              names = {name.partition("/")[2] for name in archive.getnames()}
+          required = {
+              "CMakeLists.txt",
+              "native/include/opendeck/contracts.hpp",
+              "native/include/opendeck/model.hpp",
+              "native/include/opendeck/runtime.hpp",
+              "native/private/opendeck/panel.hpp",
+              "native/private/opendeck/recognition.hpp",
+              "native/private/opendeck/source.hpp",
+              "native/src/runtime.cpp",
+              "native/src/recognition.cpp",
+              "native/src/panel.cpp",
+              "native/python/module.cpp",
+          }
+          assert required <= names, required - names
+          assert not any(name.startswith("vendor/") for name in names)
+
+          wheel, = (root / "dist").glob("*.whl")
+          environment = root / "build" / "wheel-env"
+          subprocess.run(["uv", "venv", str(environment)], check=True)
+          python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+          subprocess.run(
+              ["uv", "pip", "install", "--python", str(python), str(wheel)],
+              check=True,
+          )
+          subprocess.run(
+              [str(python), "-I", "-c", "import opendeck; import opendeck._native"],
+              check=True,
+          )
+          subprocess.run([str(python), "-I", "-m", "opendeck", "--help"], check=True)
+          PY

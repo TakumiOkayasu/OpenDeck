@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from .model import Result
+from .ports import Action
 
 
 class Start(Protocol):
@@ -10,7 +11,7 @@ class Start(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class Launch:
+class Launch(Action):
     argv: tuple[str, ...]
     target: Start
 

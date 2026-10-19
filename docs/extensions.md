@@ -2,16 +2,16 @@
 
 OpenDeckを利用するアプリや独自操作を、機器の詳細から独立して実装するための手引き。
 
-このガイドの実行例は、現在のmainのPython実装を対象とする。
-C++20への移行後は、C++の小さな抽象契約とPythonの明示的な実装関係へ置き換える計画である。
-保証の範囲と公開能力・内部書込みの分離は[詳細設計](implementation.md#c20基盤への移行計画)に従う。
-移行後のAPIやビルドが、この設計変更だけで利用可能になったとは扱わない。
+基盤はC++20で実装し、Pythonから公開契約を使う。
+Python側はABCを明示的に継承して実装する。保証の範囲と公開能力・内部書込みの分離は
+[詳細設計](implementation.md#cとpythonの境界)に従う。
 
 契約の意味や整合条件は、次の正本を参照する。
 
 - [理想入力とキーコンフィグ](design.md#理想入力とキーコンフィグ)
 - [責務と契約](design.md#責務と契約)、[整合性の規約](design.md#整合性の規約)
-- [契約のPython表現](implementation.md#契約の表現)
+- [契約の表現](implementation.md#契約の表現)
+- [ボタン能力](design/buttons.md)
 - [操作の生成と登録](implementation.md#操作の生成と登録)
 
 ## 公開契約をimportする
@@ -22,21 +22,27 @@ C++20への移行後は、C++の小さな抽象契約とPythonの明示的な実
 from opendeck import (
     Action,
     Binding,
+    Button,
+    Change,
     Chord,
     Input,
     InputError,
     Observer,
+    Read,
     Result,
     Slot,
     Status,
     Subject,
+    input_view,
+    read_view,
+    subject_view,
 )
 ```
 
-このimportはmodel・ports・bindingsだけを読み込み、Source、設定処理、
-SDKやアダプタを読み込まない。具体実装は組み立て側で明示的に選ぶ。
-移行前の現行実装では契約は構造的に満たせばよく、Protocolの継承は不要。
-この方式を、移行後の不足実装の生成禁止やC++コンパイラの保証として説明しない。
+このimportはnative extensionを必要とするが、設定処理、Device SDKやアダプタは読み込まない。
+具体実装は組み立て側で明示的に選ぶ。Pythonで独自操作を書く場合は`class Record(Action):`のように
+契約を継承し、すべての必須メソッドを実装する。欠けた実装は生成できない。
+Pythonの署名や返却値をC++コンパイラが静的に保証するものではない。
 
 ## アプリ側で入力と割り当てを決める
 
@@ -47,7 +53,8 @@ SDKやアダプタを読み込まない。具体実装は組み立て側で明�
 
 アプリの配送処理は `Input[Slot]` と `Binding` だけを受け取る形にする。
 `take()` で成立済みの一回分を受け、`binding.select(slot)` で操作を選ぶ。
-`take()` は押下状態などを返さず、空なら `None`、取得失敗なら `InputError` となる。
+この`Input[Slot]`は成立したSlotを返し、空なら`None`、取得失敗なら`InputError`となる。
+汎用の`Input[T]`の返却値はTで決まり、Buttonの履歴など別の値にも使える。
 選んだ `Action.run()` にSlotや機器情報を渡す必要はない。
 
 上位が所有する `Binding` の変更は、同じ入力へ別の操作を割り当てる変更。
@@ -91,6 +98,63 @@ SDK、実機、外部アプリの起動を必要としない。
 標準CLIは引き続き `launch` だけを登録するため、この明示的な組み立てを実行する。
 JSONに未知のkindを書くだけでは独自操作は登録されない。
 
+## ボタンの現在状態と変化を使う
+
+[examples/button_state.py](../examples/button_state.py)は、再生入力からボタンの開始・終了と現在状態を取得する例。
+
+```sh
+uv run python examples/button_state.py
+```
+
+期待する標準出力は次の3行。固定した時計を渡しているため、実時間の待機は必要ない。
+
+```text
+pressed=True at=1.0
+pressed=False at=2.0
+current=False
+```
+
+組み立て側は`factory.make_buttons()`で製品を作り、上位で選んだSlotからButtonを選ぶ。
+現在状態を使う処理へは`Read[bool]`、開始・終了を使う処理へは`Input[Change]`を渡す。
+
+```python
+def receive(state: Read[bool], changes: Input[Change]) -> None:
+    while (change := changes.take()) is not None:
+        print(f"pressed={change.pressed} at={change.at}")
+    print(f"current={state.read()}")
+
+
+button = product.buttons[primary]
+receive(read_view(button), input_view(button))
+```
+
+各helperは任意の`Read[T]`、`Input[T]`、Subjectの実装から、必要なメソッドだけを持つviewを作る。
+このviewから受信や失敗を書き込むことはできない。接続の開始・終了は組み立て側で扱う。
+短押し・長押しや同時押しの優先を解釈する場合は、取得した変化を使って拡張側で決める。
+
+通知も必要ならSubjectだけを渡し、Observer登録を組み立て側で解除する。
+同じ製品を開いて一度配送する部分は次の形になる。
+
+```python
+from opendeck.runtime import Wake
+
+subject = subject_view(button)
+wake = Wake()
+subject.add(wake)
+try:
+    product.link.open()
+    wake.wait()
+    receive(read_view(button), input_view(button))
+finally:
+    try:
+        subject.remove(wake)
+    finally:
+        product.link.close()
+```
+
+on_changeは起床を予約するだけとし、起床後にtakeで履歴を取り出す。
+通知回数と変化数は対応させない。入力の利用不能はInputErrorで扱い、正常な解放に置き換えない。
+
 ## 追加する場所を選ぶ
 
 - **実行内容を増やす**: 独自モジュールにActionを実装する。
@@ -110,8 +174,10 @@ builderへ渡る項目やエラーの扱いは、
 ## 入力を提供する拡張
 
 下位の入力提供側は `Input[Slot]` と `Subject` を別の能力として提供する。
+内部でSourceを使う場合も、利用側へはinput・subjectのviewを渡し、publishや失敗の書込み口を渡さない。
 通知を利用する組み立てでは、`Subject.add` でObserverを登録する。
 `Observer.on_change()` は処理側の起床を予約するだけにし、入力値や操作を運ばない。
+登録した組み立て側がfinallyでremoveし、接続も解放する。
 SDKのcallback内でBindingを適用したり、Actionを実行したりしない。
 
 配送側は起床後に `take()` を繰り返し、通知回数を入力件数とみなさない。

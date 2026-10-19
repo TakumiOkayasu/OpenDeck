@@ -1,16 +1,16 @@
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
+from . import _native as core  # pyright: ignore[reportMissingModuleSource]
 from .model import Chord, Slot
 
 
+def _definitions(chords: tuple[Chord, ...]) -> tuple[tuple[frozenset[Slot], Slot], ...]:
+    return tuple((chord.members, chord.slot) for chord in chords)
+
+
 def validate_adaptation(slots: Iterable[Slot], chords: tuple[Chord, ...]) -> None:
-    inputs = tuple(slots)
-    available = frozenset(inputs)
-    if len(available) != len(inputs):
-        raise ValueError("Each physical input must adapt to a distinct base slot")
-    if any(not chord.members <= available for chord in chords):
-        raise ValueError("Chord members must all be adapted base slots")
+    core.validate_adaptation(tuple(slots), _definitions(chords))
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,8 +21,7 @@ class State:
     def __post_init__(self) -> None:
         object.__setattr__(self, "held", frozenset(self.held))
         object.__setattr__(self, "claimed", frozenset(self.claimed))
-        if not self.claimed <= self.held:
-            raise ValueError("Claimed input slots must still be held")
+        core.validate_state(self.held, self.claimed)
 
 
 def apply(
@@ -31,24 +30,16 @@ def apply(
     pressed: bool,
     chords: tuple[Chord, ...] = (),
 ) -> tuple[State, tuple[Slot, ...]]:
-    if pressed:
-        if slot in state.held:
-            return state, ()
-        return State(state.held | {slot}, state.claimed), ()
-    if slot not in state.held:
-        return state, ()
-
-    held = state.held - {slot}
-    if slot in state.claimed:
-        return State(held, state.claimed - {slot}), ()
-
-    available = state.held - state.claimed
-    candidates = (
-        chord
-        for chord in chords
-        if slot in chord.members and chord.members <= available
+    held, claimed, slots = core.apply(
+        state.held, state.claimed, slot, pressed, _definitions(chords)
     )
-    chord = max(candidates, key=lambda candidate: len(candidate.members), default=None)
-    if chord is None:
-        return State(held, state.claimed), (slot,)
-    return State(held, state.claimed | (chord.members - {slot})), (chord.slot,)
+    return State(held, claimed), slots
+
+
+def hold(
+    held: frozenset[Slot],
+    slot: Slot,
+    pressed: bool,
+    chords: tuple[Chord, ...] = (),
+) -> tuple[frozenset[Slot], frozenset[Slot]]:
+    return core.hold(held, slot, pressed, _definitions(chords))

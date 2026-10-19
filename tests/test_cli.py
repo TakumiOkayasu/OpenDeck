@@ -19,6 +19,20 @@ from opendeck.ports import Product
 from opendeck.source import Source
 
 
+class TrackedSource(Source[Slot]):
+    def __init__(self):
+        super().__init__()
+        self.attached = []
+
+    def add(self, observer):
+        super().add(observer)
+        self.attached.append(observer)
+
+    def remove(self, observer):
+        super().remove(observer)
+        self.attached.remove(observer)
+
+
 def files(tmp_path: Path, argv: list[str]) -> tuple[Path, Path]:
     config = tmp_path / "config.json"
     events = tmp_path / "events.json"
@@ -112,7 +126,7 @@ def test_malformed_events_fail_without_execution(tmp_path, capsys):
 
 
 def test_cleanup_occurs_after_open_failure():
-    source = Source[Slot]()
+    source = TrackedSource()
     calls = []
 
     class Link:
@@ -126,7 +140,7 @@ def test_cleanup_occurs_after_open_failure():
     with pytest.raises(ConnectionError):
         _execute(Product(Link(), source, source), Binding({}), False)
     assert calls == ["open", "close"]
-    assert source._observers == []
+    assert source.attached == []
 
 
 @pytest.mark.parametrize("failure", [None, "factory", "open", "input", "close"])
@@ -137,7 +151,7 @@ def test_run_debug_logging_is_temporary(
     failure: str | None,
 ) -> None:
     config, _ = files(tmp_path, [str(tmp_path / "unused-program")])
-    source = Source[Slot]()
+    source = TrackedSource()
     adapter_logger = logging.getLogger(streamdock.__name__)
 
     class Link:
@@ -223,7 +237,7 @@ def test_run_debug_logging_is_temporary(
             assert logger.handlers == [existing_handler]
             assert logger.propagate is True
             assert (root.level, root.handlers, root.propagate) == root_state
-            assert source._observers == []
+            assert source.attached == []
     finally:
         logger.setLevel(level)
         logger.handlers = handlers
@@ -255,7 +269,7 @@ def test_readiness_is_flushed_only_after_successful_live_open(
 
     stderr = ErrorStream()
     monkeypatch.setattr(sys, "stderr", stderr)
-    source = Source[Slot]()
+    source = TrackedSource()
     calls: list[str] = []
     expected = (
         "opendeck: Waiting for N4 Pro input; press Ctrl+C to exit.\n"
@@ -291,7 +305,7 @@ def test_readiness_is_flushed_only_after_successful_live_open(
     assert stderr.getvalue() == expected
     assert stderr.flushed is (live and not failed)
     assert calls == ["open", "close"]
-    assert source._observers == []
+    assert source.attached == []
 
 
 def test_start_request_returns_without_waiting_for_child_exit(tmp_path):
@@ -327,7 +341,7 @@ def test_start_request_returns_without_waiting_for_child_exit(tmp_path):
 
 
 def test_keyboard_interrupt_preserves_previous_operation_failure():
-    source = Source[Slot]()
+    source = TrackedSource()
     slot = Slot("failed")
 
     class Link:
@@ -355,7 +369,7 @@ def test_keyboard_interrupt_preserves_previous_operation_failure():
 
 
 def test_startup_and_cleanup_errors_are_both_preserved():
-    source = Source[Slot]()
+    source = TrackedSource()
 
     class Link:
         def open(self):
@@ -370,4 +384,4 @@ def test_startup_and_cleanup_errors_are_both_preserved():
         "startup failed",
         "cleanup failed",
     ]
-    assert source._observers == []
+    assert source.attached == []
