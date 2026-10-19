@@ -13,6 +13,7 @@
 | [機能別要件](docs/requirements/) | 対象機能の要求、成立条件、未確定事項 |
 | [入力・実行の基本設計](docs/design.md) | 抽象契約、責務、依存方向、整合条件 |
 | [音量の基本設計](docs/design/volume.md) | 音量に固有の合意済み設計条件 |
+| [ボタン能力の基本設計](docs/design/buttons.md) | 押下状態と開始・終了を扱う能力の契約 |
 | [詳細設計と実装](docs/implementation.md) | 今回の具体方式、暫定判断、SDKの適合、検証範囲 |
 
 対象に関係する文書を読み、コード・テスト・直近のPRと照合してから変更する。
@@ -42,10 +43,21 @@
 - 純粋な計算と取得・状態保持・通知・反映を分ける。純粋であることと、所属する層は別に判断する。
 - Viewは渡された内容を描画する。対象の状態取得、表示内容の生成、操作実行を描画の責務へ含めない。
 - 汎用の取得契約の返却型を、音量・整数%・物理入力・確認済み状態などへ一律に固定しない。
+- ボタンの保持状態と、短押し・長押しなど拡張固有の解釈を分ける。基盤へ時間分類や共通閾値を追加しない。
 
 独自の抽象契約を正とし、SDKの都合へ上位の意味を合わせない。
 既存のコードやSDKを再利用し、必要な境界以外の中継クラス、待ち行列、将来用の互換処理を増やさない。
 Windowsでの利用を先行しても、共通の操作をWindows APIやWSLへ依存させない。
+
+### C++とPythonの境界
+
+C++20への移行は[詳細設計の移行計画](docs/implementation.md#c20基盤への移行計画)に従う。
+計画、導入済みの実装、実行して確認した範囲を区別して更新する。
+C++契約は純粋仮想関数、明示的な継承とoverrideで不足実装を拒否する。
+Python側のABCによる生成拒否を、Pythonの署名がC++コンパイラで静的に保証されることと混同しない。
+公開する小さな能力と、SDKから受信・失敗を書き込む非公開の能力を分ける。
+bindingの自動downcastや具体型の登録によって、公開viewから内部書込みへ到達できないようにする。
+nativeロックを保持したままGILの取得やPython callbackを待たず、通知とPython所有物の解放はロック外で行う。
 
 ## 齟齬と実機情報の扱い
 
@@ -89,6 +101,19 @@ uv run ruff check .
 uv run ruff format --check .
 git diff --check
 ```
+
+移行実装で追加するSDK・Python非依存のC++確認コマンド:
+
+```sh
+cmake -S . -B build/core -DOPENDECK_BUILD_PYTHON=OFF
+cmake --build build/core --config Release
+ctest --test-dir build/core -C Release --output-on-failure
+```
+
+この設計変更だけではCMakeやC++実装は導入されないため、導入後に実行し、結果を報告する。
+契約のコンパイル負例は、環境やincludeの不備ではなく、意図した契約違反で失敗したことを確認する。
+移行後はWindows・macOS・Linuxでnative、wheel、editableの各経路を検証する。
+wheelはcheckout外からimportし、開発ツリーへの暗黙の依存を調べる。
 
 SDK内のコードをこのリポジトリのlint対象にしない。
 CIで共通コードが通ることと、Windows/macOSのN4 Pro実機で動くことを区別して報告する。
