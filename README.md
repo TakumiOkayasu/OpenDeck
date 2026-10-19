@@ -8,6 +8,17 @@ Windowsでの利用を先行し、OSと機器に接する実装を交換でき�
 WindowsのN4 Pro実機では、通常ボタンの単独入力からアプリのプロセス生成までを確認済み。
 同時押しの実機動作とmacOSでの動作は未確認。
 
+## C++20基盤への移行計画
+
+小さな抽象契約、入力の認識・状態・配送と操作の選択・実行をC++20へ移し、
+Pythonとの連携にpybind11を使う計画とする。CLI、設定、既存SDKアダプタと拡張の具体処理はPythonを利用する。
+ボタンの開始・継続・終了の契約も引き継ぎ、短押し・長押しの分類は基盤へ追加しない。
+移行範囲、Pythonとの保証の違い、公開能力と内部書込みの境界は
+[詳細設計](docs/implementation.md#c20基盤への移行計画)に置く。
+
+この文書変更は設計の保存であり、C++実装・ビルドの導入完了を意味しない。
+以下のセットアップと実行例は、現在のmainにあるPython実装の手順である。
+
 ## セットアップ
 
 Python 3.14と[uv](https://docs.astral.sh/uv/)を使用する。
@@ -95,6 +106,8 @@ uv run python examples/extension.py
 - [マクロ実行仕様](docs/requirements/macro.md)
 - [割り当て切替仕様](docs/requirements/contexts.md)
 - [ボタン操作の基本設計](docs/design.md)
+- [ボタン入力の要件](docs/requirements/buttons.md)
+- [ボタン能力の基本設計](docs/design/buttons.md)
 - [音量の基本設計](docs/design/volume.md)
 - [実装設計・SDKの適合・実機確認](docs/implementation.md)
 - [アプリケーション・拡張の実装ガイド](docs/extensions.md)

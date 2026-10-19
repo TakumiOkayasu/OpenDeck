@@ -2,6 +2,120 @@
 
 共通する要求は[全体要件](requirements.md)、言語や取得方式から独立した契約は[基本設計](design.md)で管理する。この文書は、今回選んだ具体方式とその検証範囲を管理する。
 
+## C++20基盤への移行計画
+
+基盤の実装言語をC++20とし、Pythonとの連携にはpybind11を使う。パッケージのビルドはscikit-build-coreとCMakeで構成する。
+この節は実装前の設計であり、この文書変更だけで移行が完了したものとはしない。
+現行mainの単発入力・拡張経路と、PR #8で提案した[ボタン入力の要件](requirements/buttons.md)・[基本設計](design/buttons.md)を引き継ぐ。
+以下の「今回の実装範囲」以降は移行前のPython実装を説明し、移行後は同じ責務の実装をこの計画に従って置き換える。
+
+### 移す責務と残す責務
+
+| 責務 | 移行後の実装位置 |
+| --- | --- |
+| 小さな能力と関連製品の契約 | Python・SDKに依存しないC++の公開header |
+| SourceのFIFO、受理・失敗・破棄、Observer通知 | C++。Pythonオブジェクトの所有はbinding境界で管理 |
+| 単発入力の解放時認識と、継続するButton・同時押しの状態 | 入力実現側のC++。機器番号やSDKの型は受け取らない |
+| Bindingによる選択と、選ばれたActionへのrunの依頼 | C++。入力元やSDKから独立させる |
+| CLI、JSONの読込み、操作種別の登録・固有設定の検証 | Pythonの組み立て側 |
+| SDKの列挙、接続、初期化、raw入力番号の補正、切断監視 | 既存Pythonアダプタを再利用 |
+| Processesによるプロセス生成と、拡張固有の具体処理 | Python。C++の操作契約との橋渡しをbinding境界に置く |
+
+単発入力の暫定規則と、Buttonの継続・終了の契約を混ぜない。短押し・長押しの判定、閾値、タイマーは移行範囲へ追加しない。
+画像処理、音量、マクロ、動的コンテキスト、SDK自体のC++版への交換も今回の移行では扱わない。
+
+### 契約の強制範囲
+
+C++では`Read<T>`、`Input<T>`、Observer、Subject、Action、Link、Factoryを小さな純粋仮想関数の契約として定義する。
+所有する基底ポインタから安全に解放できるよう、契約に仮想デストラクタを置く。
+実装側は実装する契約を明示し、overrideを使う。必須メソッドが残る型は抽象型となり、インスタンスを生成できない。
+Readの戻り値はT、Inputの取り出し結果は項目または空とし、音量やSlotへ一般契約を固定しない。
+Buttonは`Read<bool>`・`Input<Change>`・Subjectの合成とし、利用側へ必要な能力だけを渡す。
+
+Pythonの公開契約はABCとabstractmethodで表現し、具体実装は明示的に継承する。
+必須メソッドが欠けたPython実装の生成は拒否するが、Pythonの引数・戻り値をC++コンパイラが静的に保証するとは扱わない。
+pybind11のtrampolineだけでPython側の不足実装の生成禁止が成立するわけでもない。
+Pythonとの呼出し・変換はbinding境界の責任とし、C++基盤へPythonの構造的型検査やSDKの実装を持ち込まない。
+
+constメソッドであることや読み取り能力だけを受け取ることは、純粋性の保証ではない。
+認識・保持状態の算出とBindingの選択は取得済みの不変値を使い、時計の採取、外部への反映、通知から分ける。
+物理入力を解釈する計算をC++へ移しても、所属は入力実現側のままとする。
+
+### 公開能力と非公開の書込み境界
+
+SDKアダプタは物理入力をSlotと押下状態へ適合し、受理した時点を採取してから、非公開の受信側へ渡す。
+この受信側はstart・receive・失敗記録・closeを扱い、機器から取得した情報をC++の認識・状態・履歴へ反映する。
+現在状態のRead、履歴のInput、通知のSubjectとは別の境界とし、アプリ・拡張へ受信側を渡さない。
+
+Pythonへ返す製品はLinkと公開能力のviewで構成する。同じ接続の状態を共有する所有元は保持し、viewが先に無効な参照になることを防ぐ。
+内部のSource、認識器、Panelの実体型はPythonへ登録しない。
+組み立て用のprivateなbridgeと、公開する能力のviewは別のbinding型にする。
+pybind11が実体型へ自動downcastして、公開能力からreceive・start・失敗書込みなどへ到達できる構成を避ける。
+privateな生成経路と公開viewは、同じ未処理入力・失敗・接続世代を参照し、状態やFIFOを二重化しない。
+
+Pythonの任意値やObserver・Actionを保持する場合、その所有と解放はbinding境界で管理する。
+nativeのロック中にPythonオブジェクトの参照カウント操作や破棄を行わない。
+Sourceに保持する項目の順序・件数・受理結果はC++が管理し、Python側に別の配送待ち行列を作らない。
+
+### ボタン能力の引継ぎ
+
+Buttonの契約と整合条件は[機能別の基本設計](design/buttons.md)に置く。
+単発入力を生成する経路と、Buttonを生成する経路は組み立て時に選び、不要な履歴を蓄積しない。
+標準CLIの単発入力経路とJSON形式は維持する。
+
+Changeはpressedとatを持つ不変値とする。atはPython側で適合済みの変化を受理した時の
+time.monotonicによる秒であり、絶対日時や機器内の発生時刻ではない。
+同じ受信で変わる個別Buttonと組合せButtonには同じ時点を渡す。
+同じ単位の単調な時計を組み立て時に差し替えられるようにし、時計の取得失敗も全Buttonの取得失敗へつなげる。
+配送の遅延を保持時間へ加算しないよう、履歴を取り出す時に時点を採取しない。
+replayは待機時間を再現せず、既定時計の差分を元の記録の保持時間とは扱わない。
+
+各Buttonの履歴はSourceを使い、liveの上限は256件、有限replayはmax(1, len(events))とする。
+一つの履歴が容量を超えた場合も、接続内の全Buttonの状態と未処理履歴を無効にする。
+再接続を所有するアプリは、拡張側の継続処理も新しい接続として開始し直す。
+
+### GIL、ロック、実行thread
+
+C++基盤はworkerを追加せず、既存のSDK reader、切断監視と、利用側の配送threadを使う。
+SDKのcallbackは適合と受信までで戻り、Bindingの選択や拡張の実行を進めない。
+
+Pythonオブジェクトの操作とPython関数の呼出しにはGILを保持する。
+純nativeの処理はGILを解放して実行できるようにし、nativeのロックを保持したままGIL取得やPythonへの呼出しを待たない。
+ロックはC++処理から戻る前に解放し、その後にGILを取得してPython側へ戻る。
+短いbinding処理でGILを保持する場合も、同じnativeロックを持つ別経路がGILを待つ循環を作らない。
+
+受信・切断とFIFOへの反映を順序付けた後、すべてのロックを解放してからObserverを呼ぶ。
+通知先のsnapshotやPythonが所有する値の後始末も、nativeロックの外で行う。
+drainは入力取得・Action・reportとの橋渡し時だけ必要なGILを取得し、待機・native処理と分ける。
+closeはSDK thread内から呼ばず、callbackの無効化とthreadの停止を終えてから関連する所有参照を解放する。
+
+### 移行時に維持する外部接続
+
+Windowsで確認済みの通常ボタンrawコードの補正と、SDKの遅延import、openとinitの区別、接続世代の管理を維持する。
+SDKのreader・heartbeatの停止、notify=False、停止可能な独自監視もPythonアダプタに残す。
+Factory.makeでは未接続の製品を構成し、Link.openの完了後に受理を開始する。
+新しいC++基盤へ替わったことを理由に、SDKや機器側の制約を上位のキーコンフィグへ移さない。
+
+現在のWindows実機での確認はPython経路に対する記録であり、C++移行後の実機確認とは分ける。
+移行後も同じ通常ボタンの単発経路、切断と終了を確認し、未確認の同時押し・Button経路・macOSを成功扱いしない。
+
+### ビルドと検証の計画
+
+SDK・Pythonを必要としないC++20の単体ビルドを用意し、native ctestでFIFO、認識、Button、Bindingと配送を検証する。
+型検査を任意の開発ツールに委ねず、必須契約の未実装、契約にない能力へのアクセス、不適合なoverrideをコンパイル負例で検証する。
+負例は意図した診断で失敗した場合だけ成功とし、includeや環境の不備による失敗と区別する。
+
+Python連携ではABCの不足実装拒否、公開viewから内部書込みへ到達しないこと、GILをまたぐ通知・切断・所有を検証する。
+既存のconfig、CLI、fake SDK、raw番号補正、実機なしの拡張例も回帰対象にする。
+Windows・macOS・LinuxのCIでnative ctest、wheel作成・インストール、editableインストールとpytestを実行する計画とする。
+wheelはcheckout外からimportして、SDKや開発ツリーが暗黙に必要になっていないことを確認する。
+SDKの機器接続を含まないCI結果を、N4 Pro実機の適合保証へ広げない。
+
+ビルド手順と公開APIの変更は実装PRでコードと合わせて更新する。この設計PRではC++ビルドと移行後pytestの成功を報告しない。
+境界の根拠は[pybind11の仮想関数](https://pybind11.readthedocs.io/en/stable/advanced/classes.html)、
+[GIL](https://pybind11.readthedocs.io/en/stable/advanced/misc.html#global-interpreter-lock-gil)、
+[所有権](https://pybind11.readthedocs.io/en/stable/advanced/smart_ptrs.html)を参照する。
+
 ## 今回の実装範囲
 
 Python 3.14で、ボタンの単独入力と同時押しを理想入力へ適合し、不変のキーコンフィグからActionを選んで実行する。
@@ -12,7 +126,9 @@ SDKを必要としない再生入力でも、同じ上位の選択と実行を�
 
 ## 契約の表現
 
-交換する能力をPythonのProtocolで表し、実装クラスの共通基底への継承を要求しない。契約名にはI接頭辞を付けず、メソッド名はsnake_caseにする。
+移行前のmainでは、交換する能力をPythonのProtocolで表し、実装クラスの共通基底への継承を要求していない。
+これはC++20移行後の契約の強制方式ではない。移行後は上記計画のC++契約とPythonの明示継承へ置き換える。
+契約名にはI接頭辞を付けず、メソッド名はsnake_caseにする。
 ジェネリック型を含む基本契約は[ports.py](../src/opendeck/ports.py)、理想入力の識別と実行結果は[model.py](../src/opendeck/model.py)で定義する。
 
 Inputの返却型は型引数で定める。理想入力の境界でSlotを返すことは、その境界の具体化であり、Inputの一般契約をSlotやパーセンテージへ固定するものではない。
