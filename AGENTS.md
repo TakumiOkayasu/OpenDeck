@@ -51,13 +51,15 @@ Windowsでの利用を先行しても、共通の操作をWindows APIやWSLへ�
 
 ### C++とPythonの境界
 
-C++20への移行は[詳細設計の移行計画](docs/implementation.md#c20基盤への移行計画)に従う。
+C++20基盤とPythonとの接続は[詳細設計](docs/implementation.md#cとpythonの境界)に従う。
 計画、導入済みの実装、実行して確認した範囲を区別して更新する。
 C++契約は純粋仮想関数、明示的な継承とoverrideで不足実装を拒否する。
 Python側のABCによる生成拒否を、Pythonの署名がC++コンパイラで静的に保証されることと混同しない。
 公開する小さな能力と、SDKから受信・失敗を書き込む非公開の能力を分ける。
 bindingの自動downcastや具体型の登録によって、公開viewから内部書込みへ到達できないようにする。
 nativeロックを保持したままGILの取得やPython callbackを待たず、通知とPython所有物の解放はロック外で行う。
+公開headerの利用側にnative/privateの検索pathやPython・SDKへの依存を追加しない。
+Observerの登録は組み立て側で所有してfinallyで解除し、ActionからBindingや配送処理へ所有関係を戻さない。
 
 ## 齟齬と実機情報の扱い
 
@@ -102,7 +104,7 @@ uv run ruff format --check .
 git diff --check
 ```
 
-移行実装で追加するSDK・Python非依存のC++確認コマンド:
+SDK・Python非依存のC++確認コマンド:
 
 ```sh
 cmake -S . -B build/core -DOPENDECK_BUILD_PYTHON=OFF
@@ -110,9 +112,9 @@ cmake --build build/core --config Release
 ctest --test-dir build/core -C Release --output-on-failure
 ```
 
-この設計変更だけではCMakeやC++実装は導入されないため、導入後に実行し、結果を報告する。
+nativeやCMakeLists.txtを変更した後はuv syncを行い、古いextensionでpytestを実行しない。
 契約のコンパイル負例は、環境やincludeの不備ではなく、意図した契約違反で失敗したことを確認する。
-移行後はWindows・macOS・Linuxでnative、wheel、editableの各経路を検証する。
+Windows・macOS・Linuxでnative、wheel、editableの各経路を検証する。
 wheelはcheckout外からimportし、開発ツリーへの暗黙の依存を調べる。
 
 SDK内のコードをこのリポジトリのlint対象にしない。

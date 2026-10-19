@@ -1,12 +1,13 @@
 from collections.abc import Callable
 from threading import Event
 
+from . import _native as core  # pyright: ignore[reportMissingModuleSource]
 from .bindings import Binding
 from .model import Result, Slot
-from .ports import Input
+from .ports import Input, Observer
 
 
-class Wake:
+class Wake(Observer):
     def __init__(self) -> None:
         self._event = Event()
 
@@ -23,10 +24,4 @@ def drain(
     binding: Binding,
     report: Callable[[Slot, Result | None], None],
 ) -> int:
-    count = 0
-    while (slot := input.take()) is not None:
-        action = binding.select(slot)
-        result = None if action is None else action.run()
-        report(slot, result)
-        count += 1
-    return count
+    return core.drain(input, binding._native, report)

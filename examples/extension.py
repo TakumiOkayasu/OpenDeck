@@ -10,7 +10,7 @@ PRIMARY = Slot("primary")
 
 
 @dataclass(frozen=True, slots=True)
-class Record:
+class Record(Action):
     text: str
     write: Callable[[str], None]
 

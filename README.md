@@ -5,23 +5,19 @@ Windowsでの利用を先行し、OSと機器に接する実装を交換でき�
 
 現在の実装範囲は、通常ボタンの単独・同時押しから設定したアプリの起動要求まで。
 音量、マクロ、管理者権限での起動、割り当て切替、設定画面と機器への描画は未実装。
-WindowsのN4 Pro実機では、通常ボタンの単独入力からアプリのプロセス生成までを確認済み。
-同時押しの実機動作とmacOSでの動作は未確認。
+従来のPython経路では、WindowsのN4 Pro実機で通常ボタンの単独入力からアプリのプロセス生成までを確認済み。
+今回のC++基盤を使うN4 Pro実機での動作は未確認。Windows・macOS・LinuxのビルドとテストはCIで検証する。
 
-## C++20基盤への移行計画
+## 構成
 
-小さな抽象契約、入力の認識・状態・配送と操作の選択・実行をC++20へ移し、
-Pythonとの連携にpybind11を使う計画とする。CLI、設定、既存SDKアダプタと拡張の具体処理はPythonを利用する。
-ボタンの開始・継続・終了の契約も引き継ぎ、短押し・長押しの分類は基盤へ追加しない。
-移行範囲、Pythonとの保証の違い、公開能力と内部書込みの境界は
-[詳細設計](docs/implementation.md#c20基盤への移行計画)に置く。
-
-この文書変更は設計の保存であり、C++実装・ビルドの導入完了を意味しない。
-以下のセットアップと実行例は、現在のmainにあるPython実装の手順である。
+小さな抽象契約、入力の認識・状態・FIFOと操作の選択・配送をC++20で実装し、pybind11でPythonへ接続する。
+CLI、設定、既存SDKアダプタと拡張の具体処理はPythonを使う。
+拡張はボタンの開始・継続・終了も利用でき、短押し・長押しの分類は拡張側で決める。
+Pythonとの保証の違いと公開能力の境界は[詳細設計](docs/implementation.md#cとpythonの境界)に置く。
 
 ## セットアップ
 
-Python 3.14と[uv](https://docs.astral.sh/uv/)を使用する。
+Python 3.14、[uv](https://docs.astral.sh/uv/)、C++20対応コンパイラ、CMake 3.26以上を使用する。
 実行と開発はWindowsネイティブ環境で行え、WSLは必要ない。
 
 ```sh
@@ -34,6 +30,8 @@ uv run opendeck --help
 既にcloneしている場合は `git submodule update --init --recursive` を実行する。
 SDKは [MiraboxSpace/StreamDock-Device-SDK](https://github.com/MiraboxSpace/StreamDock-Device-SDK)
 の固定したcommitを参照する。SDKのソースとnative libraryの配置は変更しない。
+uv syncはscikit-build-coreを通じてnative extensionをビルドする。
+native配下やCMakeLists.txtの変更もuvの再ビルド判定へ含めているため、C++を変更した後もuv syncを実行する。
 
 ## ボタン操作
 
@@ -79,6 +77,14 @@ replayはSDKを読み込まず、記録した入力を同じ認識・割り当�
 設定された操作は実際に実行するので、サンプルの起動先を自分の環境に合わせる。
 認識と境界の検証であり、本体の同時入力の取得を確認するものではない。
 
+SDK・Pythonを使わず、C++基盤だけをビルドして確認できる。
+
+```sh
+cmake -S . -B build/core -DOPENDECK_BUILD_PYTHON=OFF
+cmake --build build/core --config Release
+ctest --test-dir build/core -C Release --output-on-failure
+```
+
 ## 操作の拡張
 
 操作種別ごとの設定検証とActionの生成処理を、組み立て側から登録できる。
@@ -94,7 +100,10 @@ SDK・実機・外部アプリの起動を必要としない例も実行でき�
 
 ```sh
 uv run python examples/extension.py
+uv run python examples/button_state.py
 ```
+
+前者は独自Actionの登録と実行、後者は現在状態と開始・終了の履歴を別の能力として取得する例。
 
 ## ドキュメント
 

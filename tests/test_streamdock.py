@@ -7,12 +7,13 @@ from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Literal, cast, overload
 from unittest.mock import patch
 
 from opendeck.adapters import streamdock
 from opendeck.adapters.streamdock import StreamDockError, StreamDockFactory
 from opendeck.model import Chord, Slot
+from opendeck.ports import ButtonProduct, Product
 from opendeck.source import InputError
 
 
@@ -270,23 +271,195 @@ class SdkLoadingTests(unittest.TestCase):
 
 
 class StreamDockTests(unittest.TestCase):
-    def make(self, devices=None, *, index=None, chords=(), keys=None):
+    @overload
+    def make(
+        self,
+        devices=None,
+        *,
+        index=None,
+        chords=(),
+        keys=None,
+        buttons: Literal[False] = False,
+    ) -> Product: ...
+
+    @overload
+    def make(
+        self,
+        devices=None,
+        *,
+        index=None,
+        chords=(),
+        keys=None,
+        buttons: Literal[True],
+    ) -> ButtonProduct: ...
+
+    def make(self, devices=None, *, index=None, chords=(), keys=None, buttons=False):
         devices = [FakeN4Pro()] if devices is None else devices
         sdk = streamdock._Sdk(FakeManager(devices), FakeN4Pro, "button")
         with patch.object(streamdock, "_load", return_value=sdk):
-            return StreamDockFactory(
+            factory = StreamDockFactory(
                 {1: Slot("primary"), 2: Slot("secondary")} if keys is None else keys,
                 chords,
                 Path("sdk-checkout"),
                 device_index=index,
-            ).make()
+            )
+            return factory.make_buttons() if buttons else factory.make()
+
+    def test_button_capability_exposes_start_release_and_current_state(self):
+        device = FakeN4Pro()
+        product = self.make([device], buttons=True)
+        button = product.buttons[Slot("primary")]
+        self.assertEqual(device.opened, 0)
+        with self.assertRaises(InputError):
+            button.read()
+        product.link.open()
+        self.addCleanup(product.link.close)
+        self.assertFalse(button.read())
+        device.emit_packet(1, 1)
+        self.assertTrue(button.read())
+        start = button.take()
+        assert start is not None
+        self.assertTrue(start.pressed)
+        device.emit_packet(1, 1)
+        self.assertIsNone(button.take())
+        device.emit_packet(1, 0)
+        self.assertFalse(button.read())
+        release = button.take()
+        assert release is not None
+        self.assertFalse(release.pressed)
+        self.assertGreaterEqual(release.at, start.at)
+        self.assertIsNone(button.take())
+
+    def test_button_close_and_reopen_rejects_old_callbacks(self):
+        device = FakeN4Pro()
+        product = self.make([device], buttons=True)
+        button = product.buttons[Slot("primary")]
+        product.link.open()
+        old = device.callback
+        assert old is not None
+        device.emit_packet(1, 1)
+        product.link.close()
+        with self.assertRaises(InputError):
+            button.read()
+        with self.assertRaises(InputError):
+            button.take()
+        product.link.open()
+        self.addCleanup(product.link.close)
+        old(device, event(1, 1))
+        self.assertFalse(button.read())
+        self.assertIsNone(button.take())
+        device.emit_packet(1, 1)
+        self.assertTrue(button.read())
+
+    def test_button_overflow_invalidates_every_button_and_stops_input(self):
+        device = FakeN4Pro()
+        product = self.make([device], buttons=True)
+        product.link.open()
+        self.addCleanup(product.link.close)
+        for _ in range(129):
+            device.emit_packet(1, 1)
+            device.emit_packet(1, 0)
+        device.emit_packet(2, 1)
+        for button in product.buttons.values():
+            with self.assertRaisesRegex(InputError, "capacity"):
+                button.read()
+            with self.assertRaisesRegex(InputError, "capacity"):
+                button.take()
+
+    def test_button_disconnect_notifies_and_does_not_synthesize_release(self):
+        device = FakeN4Pro()
+        product = self.make([device], buttons=True)
+        button = product.buttons[Slot("primary")]
+        wake = Wake()
+        button.add(wake)
+        with patch.object(streamdock, "_POLL_INTERVAL", 0.01):
+            product.link.open()
+            self.addCleanup(product.link.close)
+            device.emit_packet(1, 1)
+            handed = button.take()
+            assert handed is not None
+            wake.event.clear()
+            device.transport.present = False
+            self.assertTrue(wake.event.wait(1.0))
+            self.assertTrue(handed.pressed)
+            with self.assertRaisesRegex(InputError, "disconnected"):
+                button.read()
+            with self.assertRaisesRegex(InputError, "disconnected"):
+                button.take()
+
+    def test_button_observers_can_read_state_on_another_thread_without_locks(self):
+        device = FakeN4Pro()
+        product = self.make([device], buttons=True)
+        button = product.buttons[Slot("primary")]
+        link = cast(streamdock._Link, product.link)
+        states = []
+
+        def on_change():
+            def read():
+                for lock in (link._lock, link._lifecycle):
+                    acquired = lock.acquire(blocking=False)
+                    self.assertTrue(acquired)
+                    if acquired:
+                        lock.release()
+                try:
+                    states.append(button.read())
+                except InputError:
+                    states.append(None)
+
+            worker = threading.Thread(target=read)
+            worker.start()
+            worker.join(1.0)
+            self.assertFalse(worker.is_alive())
+
+        button.add(CallbackObserver(on_change))
+        product.link.open()
+        device.emit_packet(1, 1)
+        device.emit_packet(1, 0)
+        product.link.close()
+        self.assertEqual(states, [True, False, None])
+
+    def test_button_startup_failure_retains_the_initialization_error(self):
+        device = FakeN4Pro()
+        device.init_events = (event(1, 1),)
+        device.init_error = RuntimeError("initialization failed")
+        product = self.make([device], buttons=True)
+        button = product.buttons[Slot("primary")]
+        with self.assertRaisesRegex(RuntimeError, "initialization failed"):
+            product.link.open()
+        with self.assertRaisesRegex(InputError, "initialization failed"):
+            button.read()
+        with self.assertRaisesRegex(InputError, "initialization failed"):
+            button.take()
+        self.assertEqual(device.closed, [False])
+
+    def test_invalid_button_state_faults_all_button_capabilities(self):
+        device = FakeN4Pro()
+        product = self.make([device], buttons=True)
+        product.link.open()
+        self.addCleanup(product.link.close)
+        device.emit(1, 9)
+        for button in product.buttons.values():
+            with self.assertRaisesRegex(InputError, "invalid button state"):
+                button.take()
+            with self.assertRaisesRegex(InputError, "invalid button state"):
+                button.read()
+
+    def test_button_identity_collision_is_rejected_before_loading_sdk(self):
+        a, b = Slot("a"), Slot("b")
+        with patch.object(streamdock, "_load") as load:
+            factory = StreamDockFactory(
+                {1: a, 2: b}, (Chord(frozenset({a, b}), a),), Path("sdk")
+            )
+            with self.assertRaisesRegex(ValueError, "distinct"):
+                factory.make_buttons()
+        load.assert_not_called()
 
     def test_make_is_unopened_and_native_import_is_lazy(self):
         device = FakeN4Pro()
         product = self.make([device])
         self.assertEqual(device.opened, 0)
         self.assertIsNone(product.input.take())
-        self.assertIs(product.input, product.subject)
+        self.assertIsNot(product.input, product.subject)
         product.link.close()
         self.assertEqual(device.closed, [])
 
@@ -437,7 +610,7 @@ class StreamDockTests(unittest.TestCase):
     def test_debug_logging_observes_raw_and_ignored_inputs_without_dispatch(self):
         device = FakeN4Pro()
         device.init_events = (event(1, 1), event(1, 0))
-        with self.assertLogs(streamdock._LOGGER, level="DEBUG") as captured:
+        with self.assertLogs("opendeck.adapters", level="DEBUG") as captured:
             product = self.make([device])
             product.link.open()
             try:
@@ -505,9 +678,9 @@ class StreamDockTests(unittest.TestCase):
         with self.assertRaisesRegex(InputError, "capacity"):
             product.input.take()
         self.assertFalse(link._active)
-        self.assertFalse(link._state.held)
         device.emit(2, 1)
-        self.assertFalse(link._state.held)
+        with self.assertRaisesRegex(InputError, "capacity"):
+            product.input.take()
 
     def test_input_and_fault_notifications_run_outside_the_adapter_lock(self):
         device = FakeN4Pro()
