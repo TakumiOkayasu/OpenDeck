@@ -3,10 +3,13 @@
 Mirabox N4 Proの入力を、機器から独立した操作へ割り当てる個人用ソフトウェア。
 Windowsでの利用を先行し、OSと機器に接する実装を交換できる構成にする。
 
-現在の実装範囲は、通常ボタンの単独・同時押しから設定したアプリの起動要求まで。
-音量、マクロ、管理者権限での起動、割り当て切替、設定画面と機器への描画は未実装。
+現在は、入力の認識・状態・履歴と、割り当てた操作の実行を提供する。アプリ起動は基盤を使う具体例として同梱する。
+外部拡張の読み込みと開始・終了の管理、設定画面と機器への描画はまだ提供していない。
+個別操作の仕様と開発予定は、それぞれの拡張側で管理する。
 従来のPython経路では、WindowsのN4 Pro実機で通常ボタンの単独入力からアプリのプロセス生成までを確認済み。
-今回のC++基盤を使うN4 Pro実機での動作は未確認。Windows・macOS・LinuxのビルドとテストはCIで検証する。
+C++基盤への移行後も、Windowsで操作できたことを2026-10-20のユーザー報告で確認した。
+同時押し、保持状態、切断・再接続など個別の条件とmacOS実機の確認範囲は別途扱う。
+Windows・macOS・LinuxのビルドとテストはCIで検証する。
 
 ## 構成
 
@@ -110,14 +113,11 @@ uv run python examples/button_state.py
 各文書は担当する内容の正本とし、同じ仕様を複数のファイルに複製しない。
 
 - [全体仕様](docs/requirements.md)
-- [音量仕様](docs/requirements/volume.md)
-- [アプリ起動仕様](docs/requirements/launch.md)
-- [マクロ実行仕様](docs/requirements/macro.md)
-- [割り当て切替仕様](docs/requirements/contexts.md)
+- [拡張利用の要件案](docs/requirements/extensions.md)
+- [拡張ホストの基本設計案](docs/design/extensions.md)
 - [ボタン操作の基本設計](docs/design.md)
 - [ボタン入力の要件](docs/requirements/buttons.md)
 - [ボタン能力の基本設計](docs/design/buttons.md)
-- [音量の基本設計](docs/design/volume.md)
 - [実装設計・SDKの適合・実機確認](docs/implementation.md)
 - [アプリケーション・拡張の実装ガイド](docs/extensions.md)
 
