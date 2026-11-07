@@ -1,0 +1,4 @@
+If:
+  PathMatch: 'native/.*\.(cpp|hpp)'
+CompileFlags:
+  Add: [-std=c++2d]

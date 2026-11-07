@@ -43,7 +43,7 @@ public:
         bool pending;
         {
             std::lock_guard lock(mutex_);
-            if (std::find(observers_.begin(), observers_.end(), observer) != observers_.end()) {
+            if (std::ranges::contains(observers_, observer)) {
                 return;
             }
             observers_.push_back(observer);

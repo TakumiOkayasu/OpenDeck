@@ -53,7 +53,7 @@ Windowsでの利用を先行しても、共通の操作をWindows APIやWSLへ�
 
 ### C++とPythonの境界
 
-C++20基盤とPythonとの接続は[詳細設計](docs/implementation.md#cとpythonの境界)に従う。
+C++基盤とPythonとの接続は[詳細設計](docs/implementation.md#cとpythonの境界)に従う。
 計画、導入済みの実装、実行して確認した範囲を区別して更新する。
 C++契約は純粋仮想関数、明示的な継承とoverrideで不足実装を拒否する。
 Python側のABCによる生成拒否を、Pythonの署名がC++コンパイラで静的に保証されることと混同しない。
@@ -96,25 +96,29 @@ SDKリビジョンを変更する場合は、適合と既存の回帰テスト�
 
 ### 確認コマンド
 
+[READMEのセットアップ](README.md#セットアップ)に従って固定ツールを取得し、
+`mise exec --` を通してコンパイラとビルド環境を適用する。
 標準の確認コマンド:
 
 ```sh
-uv sync --locked --all-extras
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
+mise exec -- uv sync --locked --all-extras
+mise exec -- uv run pytest
+mise exec -- uv run ruff check .
+mise exec -- uv run ruff format --check .
 git diff --check
 ```
 
 SDK・Python非依存のC++確認コマンド:
 
 ```sh
-cmake -S . -B build/core -DOPENDECK_BUILD_PYTHON=OFF
-cmake --build build/core --config Release
-ctest --test-dir build/core -C Release --output-on-failure
+mise exec -- cmake -S . -B build/core -DOPENDECK_BUILD_PYTHON=OFF -DCMAKE_BUILD_TYPE=Release
+mise exec -- cmake --build build/core --config Release
+mise exec -- ctest --test-dir build/core -C Release --output-on-failure
 ```
 
-nativeやCMakeLists.txtを変更した後はuv syncを行い、古いextensionでpytestを実行しない。
+古いgeneratorやcompilerのキャッシュがある場合、最初のconfigureに `--fresh` を付ける。
+nativeやCMakeLists.txtを変更した後は `mise exec -- uv sync` を行い、
+古いextensionでpytestを実行しない。
 契約のコンパイル負例は、環境やincludeの不備ではなく、意図した契約違反で失敗したことを確認する。
 Windows・macOS・Linuxでnative、wheel、editableの各経路を検証する。
 wheelはcheckout外からimportし、開発ツリーへの暗黙の依存を調べる。

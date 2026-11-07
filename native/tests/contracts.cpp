@@ -10,6 +10,8 @@
 
 using namespace opendeck;
 
+static_assert(__cplusplus >= 202700L, "Contracts must use the C++2d language mode");
+
 // 同じソースを、コンパイル拒否を確認する負例にも使う。
 #if defined(OPENDECK_NEGATIVE_ABSTRACT)
 int main() {
@@ -23,7 +25,7 @@ int main() {}
 int main() {
     class Wrong final : public Read<bool> {
     public:
-        bool read() { return false; }
+        bool read() override { return false; }
     };
     Wrong wrong;
 }

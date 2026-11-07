@@ -13,34 +13,40 @@ Windows・macOS・LinuxのビルドとテストはCIで検証する。
 
 ## 構成
 
-小さな抽象契約、入力の認識・状態・FIFOと操作の選択・配送をC++20で実装し、pybind11でPythonへ接続する。
+小さな抽象契約、入力の認識・状態・FIFOと操作の選択・配送をC++で実装し、pybind11でPythonへ接続する。
 CLI、設定、既存SDKアダプタと拡張の具体処理はPythonを使う。
 拡張はボタンの開始・継続・終了も利用でき、短押し・長押しの分類は拡張側で決める。
 Pythonとの保証の違いと公開能力の境界は[詳細設計](docs/implementation.md#cとpythonの境界)に置く。
 
 ## セットアップ
 
-Python 3.14、[uv](https://docs.astral.sh/uv/)、C++20対応コンパイラ、CMake 3.26以上を使用する。
+Python 3.15、[uv](https://docs.astral.sh/uv/)と[mise](https://mise.jdx.dev/)を使用する。
+uvとmiseを先にインストールし、C++コンパイラ・CMake・Ninjaはリポジトリの固定設定から取得する。
+言語モードとツールチェーン、対象architectureは[詳細設計](docs/implementation.md#言語とビルドツール)を参照する。
 実行と開発はWindowsネイティブ環境で行え、WSLは必要ない。
 
 ```sh
 git clone --recurse-submodules https://github.com/TakumiOkayasu/OpenDeck.git
 cd OpenDeck
-uv sync --locked --extra device
-uv run opendeck --help
+mise trust
+mise install --locked
+mise exec -- uv sync --locked --extra device
+mise exec -- uv run opendeck --help
 ```
 
 既にcloneしている場合は `git submodule update --init --recursive` を実行する。
 SDKは [MiraboxSpace/StreamDock-Device-SDK](https://github.com/MiraboxSpace/StreamDock-Device-SDK)
 の固定したcommitを参照する。SDKのソースとnative libraryの配置は変更しない。
-uv syncはscikit-build-coreを通じてnative extensionをビルドする。
-native配下やCMakeLists.txtの変更もuvの再ビルド判定へ含めているため、C++を変更した後もuv syncを実行する。
+Pythonは `.python-version` に従ってuvが選択する。初回はツール、Pythonと依存パッケージのダウンロードが必要になる。
+以下のコマンドも `mise exec --` を通し、固定したコンパイラとビルド環境を使用する。
+`mise exec -- uv sync` はscikit-build-coreを通じてnative extensionをビルドする。
+native配下やCMakeLists.txtも再ビルド判定に含めているため、C++の変更後も同じsyncを実行する。
 
 ## ボタン操作
 
 ```sh
-uv run opendeck devices
-uv run opendeck run examples/buttons.json
+mise exec -- uv run opendeck devices
+mise exec -- uv run opendeck run examples/buttons.json
 ```
 
 `examples/buttons.json` はWindows向けのサンプル。
@@ -57,7 +63,7 @@ SDKの画像配置用インデックスではない。
 入力が反応しない場合は、次のコマンドで起動と入力のDEBUGログをstderrへ出す。
 
 ```sh
-uv run opendeck run examples/buttons.json --debug
+mise exec -- uv run opendeck run examples/buttons.json --debug
 ```
 
 起動ログと入力ログを分けて確認する。デコーダーのフィルター前の全SDK rawイベントと
@@ -70,10 +76,10 @@ uv run opendeck run examples/buttons.json --debug
 ## 実機なしの確認
 
 ```sh
-uv run opendeck replay examples/buttons.json examples/button-events.json
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
+mise exec -- uv run opendeck replay examples/buttons.json examples/button-events.json
+mise exec -- uv run pytest
+mise exec -- uv run ruff check .
+mise exec -- uv run ruff format --check .
 ```
 
 replayはSDKを読み込まず、記録した入力を同じ認識・割り当て・実行経路へ渡す。
@@ -83,10 +89,14 @@ replayはSDKを読み込まず、記録した入力を同じ認識・割り当�
 SDK・Pythonを使わず、C++基盤だけをビルドして確認できる。
 
 ```sh
-cmake -S . -B build/core -DOPENDECK_BUILD_PYTHON=OFF
-cmake --build build/core --config Release
-ctest --test-dir build/core -C Release --output-on-failure
+mise exec -- cmake -S . -B build/core -DOPENDECK_BUILD_PYTHON=OFF \
+    -DCMAKE_BUILD_TYPE=Release
+mise exec -- cmake --build build/core --config Release
+mise exec -- ctest --test-dir build/core -C Release --output-on-failure
 ```
+
+既存の `build/core` に古いgeneratorやcompilerが保存されている場合は、
+最初のconfigureコマンドの `cmake` の直後へ `--fresh` を追加する。
 
 ## 操作の拡張
 
@@ -102,8 +112,8 @@ ctest --test-dir build/core -C Release --output-on-failure
 SDK・実機・外部アプリの起動を必要としない例も実行できる。
 
 ```sh
-uv run python examples/extension.py
-uv run python examples/button_state.py
+mise exec -- uv run python examples/extension.py
+mise exec -- uv run python examples/button_state.py
 ```
 
 前者は独自Actionの登録と実行、後者は現在状態と開始・終了の履歴を別の能力として取得する例。

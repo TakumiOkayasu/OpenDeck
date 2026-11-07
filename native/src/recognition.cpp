@@ -7,7 +7,7 @@ namespace opendeck {
 namespace {
 
 bool contains_all(const std::set<Slot> &available, const std::set<Slot> &members) {
-    return std::includes(available.begin(), available.end(), members.begin(), members.end());
+    return std::ranges::includes(available, members);
 }
 
 } // namespace

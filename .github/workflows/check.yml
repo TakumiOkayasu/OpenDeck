@@ -18,9 +18,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: "2026.11.2"
+          install_args: "--locked"
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: "0.12.23"
+          version: "0.13.7"
+          python-version: "3.15"
           enable-cache: true
       - run: uv sync --locked --all-extras
       - run: uv run ruff check .
@@ -29,7 +34,7 @@ jobs:
       - run: uv run opendeck --help
       - name: Build and test the standalone C++ core
         run: |
-          cmake -S . -B build/core -DOPENDECK_BUILD_PYTHON=OFF
+          cmake -S . -B build/core -DOPENDECK_BUILD_PYTHON=OFF -DCMAKE_BUILD_TYPE=Debug
           cmake --build build/core --config Debug --parallel 2
           ctest --test-dir build/core -C Debug --output-on-failure
       - name: Build source and wheel distributions
@@ -41,6 +46,7 @@ jobs:
           import os
           import subprocess
           import tarfile
+          import tempfile
           from pathlib import Path
 
           root = Path.cwd()
@@ -59,6 +65,11 @@ jobs:
               "native/src/recognition.cpp",
               "native/src/panel.cpp",
               "native/python/module.cpp",
+              "native/tests/contracts.cpp",
+              "native/tests/older_standard.cpp",
+              "native/tests/mixed_consumer/CMakeLists.txt",
+              "native/tests/mixed_consumer/main.cpp",
+              "native/tests/mixed_consumer/helper.c",
           }
           assert required <= names, required - names
           assert not any(name.startswith("vendor/") for name in names)
@@ -71,9 +82,15 @@ jobs:
               ["uv", "pip", "install", "--python", str(python), str(wheel)],
               check=True,
           )
-          subprocess.run(
-              [str(python), "-I", "-c", "import opendeck; import opendeck._native"],
-              check=True,
-          )
-          subprocess.run([str(python), "-I", "-m", "opendeck", "--help"], check=True)
+          with tempfile.TemporaryDirectory(prefix="opendeck-wheel-") as outside:
+              subprocess.run(
+                  [str(python), "-I", "-c", "import opendeck; import opendeck._native"],
+                  cwd=outside,
+                  check=True,
+              )
+              subprocess.run(
+                  [str(python), "-I", "-m", "opendeck", "--help"],
+                  cwd=outside,
+                  check=True,
+              )
           PY

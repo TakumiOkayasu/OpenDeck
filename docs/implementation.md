@@ -4,7 +4,8 @@
 
 ## 今回の実装範囲
 
-基盤をC++20で実装し、Python 3.14からpybind11を介して利用する。ビルドはscikit-build-coreとCMakeで構成する。
+基盤をC++29 draft modeで実装し、Python 3.15からpybind11を介して利用する。
+ビルドはscikit-build-coreとCMakeで構成する。
 単発入力の認識、ボタンの継続状態、FIFOと配送をC++へ移し、CLI、設定、機器との接続と操作の具体処理はPythonに置く。
 
 N4 Proへの接続は既存の公式Python Device SDKアダプタを再利用する。SDKがBUTTONに分類する入力を受け付け、通常ボタンの識別子はraw入力コードに合わせる。
@@ -14,6 +15,64 @@ SDKを必要としないreplayでも、同じ認識・状態・割り当て・�
 指定した引数列によるプロセス生成を、基盤の利用例として同梱する。個別操作の機能一覧や将来仕様は基盤で管理しない。
 外部拡張の読み込み・開始・終了の管理、設定画面と機器への描画は未実装である。
 拡張利用の次段階は[要件案](requirements/extensions.md)と[基本設計案](design/extensions.md)で扱う。
+
+## 言語とビルドツール
+
+### 言語の選択と規格の状態
+
+今回採用するのは、LLVM Clangの `-std=c++2d` によるC++29 draft modeである。
+[ISO C++の規格状況](https://isocpp.org/std/status)では、発行済みの最新規格はC++23で、C++26は策定中である。
+C++29を発行済みの規格として扱わない。
+[Clangの対応状況](https://clang.llvm.org/cxx_status.html)でもdraftの実装は部分的であり、
+このモードの採用をC++29の全機能への準拠保証とはしない。
+
+LLVM Clang 23.1.3で確認した `__cplusplus` は次のとおりだった。
+この値は選択したcompiler modeの確認であり、規格の発行年や全機能の実装保証を表さない。
+
+| mode | `__cplusplus` |
+| --- | --- |
+| `-std=c++20` | `202002L` |
+| `-std=c++26` | `202400L` |
+| `-std=c++2d` | `202700L` |
+
+CMake 4.4.5には `CXX_STANDARD 29`・`cxx_std_29` がないため、
+`opendeck_dialect` のINTERFACE compile optionで `-std=c++2d` を共有する。
+coreからPUBLICに伝播し、native extension・C++利用側・契約の正例と負例を同じmodeでビルドする。
+オプションはC++のコンパイルだけに適用し、C/C++混在consumerのCソースには渡さない。
+LLVM Clang 23以上のGNU-style driverである `clang++` を要求し、
+AppleClang・MSVC・GCC・clang-clは今回の構成では受け付けない。
+公開headerと契約テストは `__cplusplus >= 202700L` をコンパイル時に検査し、旧modeへの暗黙のfallbackを拒否する。
+
+エディタもLLVM clangd 23以上を利用する。
+[.clangd](../.clangd)でnativeのC++ファイルだけにdraft modeを指定し、Cソースには適用しない。
+エディタが更新前の解析状態を保持している場合は、使用するclangdを確認して言語サーバーを再起動する。
+
+言語更新に伴う製品コードの整理は `std::ranges::contains`・`std::ranges::includes` の利用に限定する。
+これらはC++29固有の機能ではなく、責務、契約、認識・通知の振る舞いは変更しない。
+
+### 固定ツールチェーンと対象環境
+
+[mise.toml](../mise.toml)と[mise.lock](../mise.lock)で、
+LLVM Clang 23.1.3、CMake 4.4.5、Ninja 1.13.2を固定する。CMakeの最低バージョンは4.3とする。
+`mise exec --` を通して `CXX=clang++` と `CMAKE_GENERATOR=Ninja` を適用する。
+Pythonは[.python-version](../.python-version)の3.15をuvで選択する。
+[pyproject.toml](../pyproject.toml)の下限は `requires-python = ">=3.15"` とし、
+Ruff・Pyrightの対象も3.15に揃える。
+bindingはpybind11 3.1.0、build backendはscikit-build-core 1.1.1に固定する。
+取得と実行は[READMEのセットアップ](../README.md#セットアップ)、
+古いCMakeキャッシュからの移行は[実機なしの確認](../README.md#実機なしの確認)を参照する。
+初回取得にはネットワークを使い、以後は各ツールのキャッシュを利用する。
+
+lockの対象はWindows x64・Linux x64・macOS ARM64である。
+macOSの `aarch64` と `arm64` は同じ64bit ARM architectureを指し、Intel Macのx86_64とは異なる。
+選択した[LLVM 23.1.3の配布物][llvm-release]には
+macOS ARM64のarchiveがあり、Intel Mac向けarchiveはない。
+CIの `macos-latest` も[GitHubのrunner仕様][github-runners]ではARM64である。
+Intel Macで別途用意したLLVM Clang 23以上を使う経路は未検証であり、lock付きセットアップの対象には含めない。
+ツールの取得対象であることと、その環境でビルド・実行して確認済みであることは区別する。
+
+[llvm-release]: https://github.com/llvm/llvm-project/releases/tag/llvmorg-23.1.3
+[github-runners]: https://docs.github.com/en/actions/reference/runners/github-hosted-runners
 
 ## C++とPythonの境界
 
@@ -96,7 +155,9 @@ SDKのcallback threadからcloseしない。
 Python側は`NewType("Slot", str)`、C++側は名前を持つSlotで識別し、bindingが値を変換する。
 設定では空や重複のない名前を上位が宣言する。機器番号に依存する固定コード一覧や別の仮想キー型は追加しない。
 
-[パッケージルート](../src/opendeck/__init__.py)から、Slot、Chord、Change、Read、Input、Subject、Observer、Button、ButtonProduct、ButtonFactory、Binding、Action、Result、Status、InputErrorと能力別view helperを公開する。
+[パッケージルート](../src/opendeck/__init__.py)から、次の型と能力別view helperを公開する。
+Slot、Chord、Change、Read、Input、Subject、Observer、Button、ButtonProduct、
+ButtonFactory、Binding、Action、Result、Status、InputErrorを含む。
 import時にはnative extensionを必要とするが、設定処理、入力アダプタ、Device SDKやそのDLLは読み込まない。
 InputErrorはC++由来の共通例外とし、Python facadeとnativeの取得失敗で同じ例外を使う。
 公開能力の使い分けと例は[アプリケーション・拡張の実装ガイド](extensions.md)に置く。
@@ -227,7 +288,7 @@ Sourceは失敗を保持し、takeはInputErrorを送出する。単に入力が
 | [panel.hpp](../native/private/opendeck/panel.hpp)、[panel.cpp](../native/src/panel.cpp) | 非公開のButton状態・履歴と接続内の整合 |
 | [module.cpp](../native/python/module.cpp) | 型変換、Python所有物、能力view、GILを含むbinding境界 |
 | [CMakeLists.txt](../CMakeLists.txt)、[pyproject.toml](../pyproject.toml) | C++ core、native extensionと配布物のビルド |
-| [__init__.py](../src/opendeck/__init__.py) | アプリ・拡張向け契約の公開 |
+| [**init**.py](../src/opendeck/__init__.py) | アプリ・拡張向け契約の公開 |
 | [model.py](../src/opendeck/model.py)、[ports.py](../src/opendeck/ports.py) | Python向けの不変値、ABC、関連製品とview helper |
 | [bindings.py](../src/opendeck/bindings.py) | C++ BindingへのPython facade |
 | [runtime.py](../src/opendeck/runtime.py) | 起床とnative drainへの接続 |
@@ -313,12 +374,26 @@ SDKのreader、heartbeat、独自の監視threadが停止したことを確認�
 
 ## 検証の区分
 
-C++ coreだけをSDK・Pythonなしでビルドし、contracts・runtime・inputのnative CTestを実行する。
-同じ公開headerで正例をコンパイルした上で、未実装Buttonの生成、Readにないtakeの利用、非constのreadによる実装漏れをコンパイル負例として拒否する。
+C++ coreだけをSDK・Pythonなしでビルドし、contracts・runtime・inputと混在consumerのCTestを実行する。
+C/C++混在consumerは別のCMake projectとしてcoreをリンクし、C++側の公開headerとC側のコンパイル・実行を確認する。
+同じ公開headerとC++2d modeで正例をコンパイルした上で、未実装Buttonの生成、Readにないtakeの利用、
+非constのreadに付けたoverrideによる署名不一致をコンパイル負例として拒否する。
+失敗理由も照合し、抽象型、takeの不在、overrideの不一致による拒否であることを確認する。
+旧mode拒否のprobeだけは意図的にC++20を使い、公開headerのC++2d要求による診断で失敗することを確認する。
+環境やincludeの不備による失敗を、契約違反や旧modeの拒否成功として扱わない。
 内部入力テストだけがprivate headerを使い、公開契約・配送・コンパイル例へ内部headerの検索pathを渡さない。
 
 Python側ではABCの不足実装拒否、汎用の能力view、所有参照の解放、GILをまたぐ通知・切断と既存APIの回帰を検証する。
-Linuxのローカル環境ではnativeビルドとPython連携を確認した。各OSのCI結果とN4 Pro実機の適合確認は分ける。
+言語更新前のLinuxローカル環境ではnativeビルドとPython連携を確認した。
+言語更新後のWindowsではCPython 3.15.2とLLVM Clang 23.1.3で、
+editable環境のpytest 197件と18 subtests、standalone coreのRelease・DebugのCTest各4件の成功を確認した。
+sdistの内容を検査し、そのsdistからCPython 3.15用wheelを生成した。
+別venvへwheelを入れ、checkout外の作業ディレクトリで隔離import・CLIと全197件・18 subtestsの成功も確認した。
+更新後のLinux/macOSのビルド・実行と、新しい3OS CIの実行結果は、この作業時点では未確認である。
+Python 3.15指定のPyrightでsrcのエラー・警告はなかった。
+全体検査のテスト側48件は、Python 3.14指定でも同件数を再現する既存のABC未継承に関する診断であり、今回変更していない。
+今回の言語更新では実機の検証を行っていない。過去の実機情報は後述の記録を維持する。
+各OSのCI結果とN4 Pro実機の適合確認は分ける。
 CIにはWindows・macOS・Linuxでeditable環境のpytest、native CTest、sdist/wheel作成とwheelの分離インストールを定義する。
 sdistはビルドに必要なnativeソースを含み、vendorは含めない。wheelのimportとCLIはcheckoutへ依存しない隔離モードで確認する。
 CIの構成を、まだ得ていない各OSの実行結果やN4 Pro実機の適合保証とは扱わない。
@@ -333,7 +408,7 @@ bindingの境界は[pybind11の仮想関数](https://pybind11.readthedocs.io/en/
 従来のPython経路について、ユーザーのWindows実機ログでは上記firmwareのN4 Proの接続・初期化と通常ボタンの入力パケット取得を確認している。
 補正後の実機ログでは、通常ボタン1の解放からprimaryの認識と起動操作のdone（プロセスIDの返却）、通常ボタン2からsecondaryの認識とunassignedを確認した。これは単独入力からプロセス生成までの確認であり、起動したGUIの準備完了や同時押しの実機動作を確認したものではない。
 2026-10-20、ユーザーからC++基盤への移行後もWindowsで操作できたとの報告を受けた。
-これは今回の経路によるWindows操作の確認として記録する。操作手順や入力の構成は今回の報告では特定されていないため、同時押し、Buttonの保持・履歴、切断・再接続、macOS実機まで確認済みとは扱わない。
+これはC++基盤への移行時点のWindows操作の確認として記録する。操作手順や入力の構成は今回の報告では特定されていないため、同時押し、Buttonの保持・履歴、切断・再接続、macOS実機まで確認済みとは扱わない。
 再生入力やfake機器のテスト成功を、SDK/native libraryや機器本体の適合確認に置き換えない。
 
 実機では通常キーと副画面入力の識別と通知列の違い、複数保持、押下順と解放順、長押し時の重複、通知欠落、抜き差し、初期化による表示への影響、純正ソフトとの同時利用可否を確認する。失敗時に操作が重複実行されないこと、終了後にreaderや監視が残らないこと、機器を再び開けることも確認する。

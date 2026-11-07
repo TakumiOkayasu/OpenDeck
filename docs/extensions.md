@@ -3,7 +3,8 @@
 OpenDeckを利用するアプリや独自操作を、機器の詳細から独立して実装するための手引き。
 現在の手動による組み立てを説明する。外部拡張ホストの次段階は[要件案](requirements/extensions.md)と[基本設計案](design/extensions.md)を参照する。
 
-基盤はC++20で実装し、Pythonから公開契約を使う。
+基盤はC++で実装し、Pythonから公開契約を使う。
+採用する言語モードとツールチェーンは[詳細設計](implementation.md#言語とビルドツール)を参照する。
 Python側はABCを明示的に継承して実装する。保証の範囲と公開能力・内部書込みの分離は
 [詳細設計](implementation.md#cとpythonの境界)に従う。
 
@@ -71,7 +72,7 @@ Pythonの署名や返却値をC++コンパイラが静的に保証するもの�
 環境の準備は[README](../README.md#セットアップ)を参照。
 
 ```sh
-uv run python examples/extension.py
+mise exec -- uv run python examples/extension.py
 ```
 
 期待する標準出力は次の2行。
@@ -104,7 +105,7 @@ JSONに未知のkindを書くだけでは独自操作は登録されない。
 [examples/button_state.py](../examples/button_state.py)は、再生入力からボタンの開始・終了と現在状態を取得する例。
 
 ```sh
-uv run python examples/button_state.py
+mise exec -- uv run python examples/button_state.py
 ```
 
 期待する標準出力は次の3行。固定した時計を渡しているため、実時間の待機は必要ない。
