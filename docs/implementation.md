@@ -391,7 +391,10 @@ C++23への切替準備では、LinuxのGCC 14.2とCPython 3.15.1を使った手
 native 3件・混在consumerと、Pythonの202件・18 subtestsの成功を確認した。
 C++23での正例の成功、契約負例3種とC++20の意図した拒否も確認した。
 これは製品コードの規格適合確認であり、GCCをサポート対象へ追加するものではない。
-固定したLLVM Clang/CMake経路、wheel・editableと3OS CIでの切替後の結果は別途確認する。
+切替後の[3OS CI](https://github.com/TakumiOkayasu/OpenDeck/actions/runs/42329390257)では、
+固定したLLVM Clang 23.1.3/CMake経路でWindows・macOS・Linuxの全jobが成功した。
+各OSでeditable環境のpytest 202件、native CTest 4件、clangdの3ファイルのエラー0件、
+sdist/wheel作成とcheckout外からの隔離import・CLIを確認した。
 Python 3.15指定のPyrightでsrcのエラー・警告はなかった。
 全体検査のテスト側48件は、Python 3.14指定でも同件数を再現する既存のABC未継承に関する診断であり、今回変更していない。
 今回の言語更新では実機の検証を行っていない。過去の実機情報は後述の記録を維持する。
