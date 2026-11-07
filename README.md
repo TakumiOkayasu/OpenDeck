@@ -20,7 +20,7 @@ Pythonとの保証の違いと公開能力の境界は[詳細設計](docs/implem
 
 ## セットアップ
 
-Python 3.15、[uv](https://docs.astral.sh/uv/)と[mise](https://mise.jdx.dev/)を使用する。
+C++23、Python 3.15、[uv](https://docs.astral.sh/uv/)と[mise](https://mise.jdx.dev/)を使用する。
 uvとmiseを先にインストールし、C++コンパイラ・CMake・Ninjaはリポジトリの固定設定から取得する。
 言語モードとツールチェーン、対象architectureは[詳細設計](docs/implementation.md#言語とビルドツール)を参照する。
 実行と開発はWindowsネイティブ環境で行え、WSLは必要ない。

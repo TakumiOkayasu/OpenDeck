@@ -4,7 +4,7 @@
 
 ## 今回の実装範囲
 
-基盤をC++29 draft modeで実装し、Python 3.15からpybind11を介して利用する。
+基盤をC++23で実装し、Python 3.15からpybind11を介して利用する。
 ビルドはscikit-build-coreとCMakeで構成する。
 単発入力の認識、ボタンの継続状態、FIFOと配送をC++へ移し、CLI、設定、機器との接続と操作の具体処理はPythonに置く。
 
@@ -20,39 +20,32 @@ SDKを必要としないreplayでも、同じ認識・状態・割り当て・�
 
 ### 言語の選択と規格の状態
 
-今回採用するのは、LLVM Clangの `-std=c++2d` によるC++29 draft modeである。
-[ISO C++の規格状況](https://isocpp.org/std/status)では、発行済みの最新規格はC++23で、C++26は策定中である。
-C++29を発行済みの規格として扱わない。
-[Clangの対応状況](https://clang.llvm.org/cxx_status.html)でもdraftの実装は部分的であり、
-このモードの採用をC++29の全機能への準拠保証とはしない。
+今回採用する言語規格は、発行済みのC++23とする。
+LLVM Clangの `-std=c++23` を使い、策定中のdraft modeには依存しない。
+規格の対応状況は[ISO C++](https://isocpp.org/std/status)と
+[Clang](https://clang.llvm.org/cxx_status.html)を参照する。
+言語モードの選択は、規格の全機能への準拠保証を表さない。
 
-LLVM Clang 23.1.3で確認した `__cplusplus` は次のとおりだった。
-この値は選択したcompiler modeの確認であり、規格の発行年や全機能の実装保証を表さない。
-
-| mode | `__cplusplus` |
-| --- | --- |
-| `-std=c++20` | `202002L` |
-| `-std=c++26` | `202400L` |
-| `-std=c++2d` | `202700L` |
-
-CMake 4.4.5には `CXX_STANDARD 29`・`cxx_std_29` がないため、
-`opendeck_dialect` のINTERFACE compile optionで `-std=c++2d` を共有する。
-coreからPUBLICに伝播し、native extension・C++利用側・契約の正例と負例を同じmodeでビルドする。
-オプションはC++のコンパイルだけに適用し、C/C++混在consumerのCソースには渡さない。
+CMakeの `cxx_std_23` を `opendeck_dialect` のINTERFACE compile featureで共有する。
+coreからPUBLICに伝播し、native extension・C++利用側・契約の正例と負例へC++23の要件を渡す。
+プロジェクト内のC++拡張modeを無効にし、通常のビルドは `-std=c++23` を使う。
+C++の要件はC/C++混在consumerのCソースには適用しない。
 LLVM Clang 23以上のGNU-style driverである `clang++` を要求し、
 AppleClang・MSVC・GCC・clang-clは今回の構成では受け付けない。
-公開headerと契約テストは `__cplusplus >= 202700L` をコンパイル時に検査し、旧modeへの暗黙のfallbackを拒否する。
+公開headerは `__cplusplus >= 202302L` をコンパイル時に検査し、C++20以前への暗黙のfallbackを拒否する。
+契約テストと混在consumerのC++ソースでは `__cplusplus == 202302L` を確認し、
+ビルドの要求がdraft modeへ戻っていないことも検証する。
 
 エディタもLLVM clangd 23以上を利用する。
-[.clangd](../.clangd)でnativeのC++ファイルだけにdraft modeを指定し、Cソースには適用しない。
+[.clangd](../.clangd)でnativeのC++ファイルだけにC++23を指定し、Cソースには適用しない。
 同じ設定で `build/clangd/compile_commands.json` を参照し、実際のtargetのinclude検索pathを使う。
 databaseはcore・契約テスト・Python bindingを有効にして専用configureで生成する。
 pybind11は開発用依存にも固定し、build isolationの一時ディレクトリを参照しない。
 生成と更新の手順は[READMEのC++エディタ設定](../README.md#cエディタの設定)に置く。
 エディタが更新前の解析状態を保持している場合は、使用するclangdを確認して言語サーバーを再起動する。
 
-言語更新に伴う製品コードの整理は `std::ranges::contains`・`std::ranges::includes` の利用に限定する。
-これらはC++29固有の機能ではなく、責務、契約、認識・通知の振る舞いは変更しない。
+製品コードが利用する `std::ranges::contains`・`std::ranges::includes` はC++23で利用できる。
+今回の言語モード変更では、責務、契約、認識・通知の振る舞いを変更しない。
 
 ### 固定ツールチェーンと対象環境
 
@@ -380,20 +373,25 @@ SDKのreader、heartbeat、独自の監視threadが停止したことを確認�
 
 C++ coreだけをSDK・Pythonなしでビルドし、contracts・runtime・inputと混在consumerのCTestを実行する。
 C/C++混在consumerは別のCMake projectとしてcoreをリンクし、C++側の公開headerとC側のコンパイル・実行を確認する。
-同じ公開headerとC++2d modeで正例をコンパイルした上で、未実装Buttonの生成、Readにないtakeの利用、
+同じ公開headerとC++23 modeで正例をコンパイルした上で、未実装Buttonの生成、Readにないtakeの利用、
 非constのreadに付けたoverrideによる署名不一致をコンパイル負例として拒否する。
 失敗理由も照合し、抽象型、takeの不在、overrideの不一致による拒否であることを確認する。
-旧mode拒否のprobeだけは意図的にC++20を使い、公開headerのC++2d要求による診断で失敗することを確認する。
+旧mode拒否のprobeだけは意図的にC++20を使い、公開headerのC++23要求による診断で失敗することを確認する。
 環境やincludeの不備による失敗を、契約違反や旧modeの拒否成功として扱わない。
 内部入力テストだけがprivate headerを使い、公開契約・配送・コンパイル例へ内部headerの検索pathを渡さない。
 
 Python側ではABCの不足実装拒否、汎用の能力view、所有参照の解放、GILをまたぐ通知・切断と既存APIの回帰を検証する。
 言語更新前のLinuxローカル環境ではnativeビルドとPython連携を確認した。
-言語更新後のWindowsではCPython 3.15.2とLLVM Clang 23.1.3で、
+C++29 draft modeへの更新時点のWindowsではCPython 3.15.2とLLVM Clang 23.1.3で、
 editable環境のpytest 197件と18 subtests、standalone coreのRelease・DebugのCTest各4件の成功を確認した。
 sdistの内容を検査し、そのsdistからCPython 3.15用wheelを生成した。
 別venvへwheelを入れ、checkout外の作業ディレクトリで隔離import・CLIと全197件・18 subtestsの成功も確認した。
-更新後のLinux/macOSのビルド・実行と、新しい3OS CIの実行結果は、この作業時点では未確認である。
+これらはC++29 draft mode時点の記録であり、C++23への切替後の確認結果とは区別する。
+C++23への切替準備では、LinuxのGCC 14.2とCPython 3.15.1を使った手動ビルドで、
+native 3件・混在consumerと、Pythonの202件・18 subtestsの成功を確認した。
+C++23での正例の成功、契約負例3種とC++20の意図した拒否も確認した。
+これは製品コードの規格適合確認であり、GCCをサポート対象へ追加するものではない。
+固定したLLVM Clang/CMake経路、wheel・editableと3OS CIでの切替後の結果は別途確認する。
 Python 3.15指定のPyrightでsrcのエラー・警告はなかった。
 全体検査のテスト側48件は、Python 3.14指定でも同件数を再現する既存のABC未継承に関する診断であり、今回変更していない。
 今回の言語更新では実機の検証を行っていない。過去の実機情報は後述の記録を維持する。
