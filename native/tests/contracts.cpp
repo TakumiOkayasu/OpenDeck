@@ -10,7 +10,7 @@
 
 using namespace opendeck;
 
-static_assert(__cplusplus >= 202700L, "Contracts must use the C++2d language mode");
+static_assert(__cplusplus == 202302L, "Contracts must use the C++23 language mode");
 
 // 同じソースを、コンパイル拒否を確認する負例にも使う。
 #if defined(OPENDECK_NEGATIVE_ABSTRACT)

@@ -7,15 +7,17 @@ if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
    OR CMAKE_CXX_COMPILER_VERSION VERSION_LESS 23
    OR NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
     message(FATAL_ERROR
-        "OpenDeck requires LLVM Clang 23+ (clang++) for C++2d. "
+        "OpenDeck requires LLVM Clang 23+ (clang++) for C++23. "
         "Use mise exec -- cmake."
     )
 endif()
 
-# CMake has no cxx_std_29 yet. Share the draft mode with consumers and probes.
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Share the C++23 requirement with consumers and contract probes.
 add_library(opendeck_dialect INTERFACE IMPORTED GLOBAL)
 set_target_properties(opendeck_dialect PROPERTIES
-    INTERFACE_COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:-std=c++2d>"
+    INTERFACE_COMPILE_FEATURES cxx_std_23
 )
 
 add_library(opendeck_core STATIC
@@ -100,7 +102,7 @@ if(BUILD_TESTING)
             "Public headers must reject older C++ language modes"
         )
     endif()
-    if(NOT older_standard_output MATCHES "OpenDeck requires C[+][+]2d")
+    if(NOT older_standard_output MATCHES "OpenDeck requires C[+][+]23")
         message(FATAL_ERROR
             "The older-mode probe failed for an unexpected reason:\n"
             "${older_standard_output}"
@@ -128,5 +130,5 @@ if(BUILD_TESTING)
                 "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
             --test-command "${consumer_executable}"
     )
-    message(STATUS "Verified C++2d mode and contract compile-failure probes")
+    message(STATUS "Verified C++23 mode and contract compile-failure probes")
 endif()

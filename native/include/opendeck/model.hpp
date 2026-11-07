@@ -4,7 +4,7 @@
 #include <set>
 #include <string>
 
-static_assert(__cplusplus >= 202700L, "OpenDeck requires C++2d (C++29 draft) or newer");
+static_assert(__cplusplus >= 202302L, "OpenDeck requires C++23 or newer");
 
 namespace opendeck {
 

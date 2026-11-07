@@ -2,4 +2,4 @@ If:
   PathMatch: 'native/.*\.(cpp|hpp)'
 CompileFlags:
   CompilationDatabase: build/clangd
-  Add: [-std=c++2d]
+  Add: [-std=c++23]

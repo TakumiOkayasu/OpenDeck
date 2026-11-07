@@ -1,5 +1,7 @@
 #include "opendeck/model.hpp"
 
+static_assert(__cplusplus == 202302L, "Consumers must receive the C++23 language mode");
+
 extern "C" int helper(void);
 
 int main() {
