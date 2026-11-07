@@ -1,15 +1,33 @@
-cmake_minimum_required(VERSION 3.26)
+cmake_minimum_required(VERSION 4.3)
 project(OpenDeck LANGUAGES CXX)
 
 option(OPENDECK_BUILD_PYTHON "Build the Python extension" ON)
+
+if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
+   OR CMAKE_CXX_COMPILER_VERSION VERSION_LESS 23
+   OR NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
+    message(FATAL_ERROR
+        "OpenDeck requires LLVM Clang 23+ (clang++) for C++2d. "
+        "Use mise exec -- cmake."
+    )
+endif()
+
+# CMake has no cxx_std_29 yet. Share the draft mode with consumers and probes.
+add_library(opendeck_dialect INTERFACE IMPORTED GLOBAL)
+set_target_properties(opendeck_dialect PROPERTIES
+    INTERFACE_COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:-std=c++2d>"
+)
 
 add_library(opendeck_core STATIC
     native/src/runtime.cpp
     native/src/recognition.cpp
     native/src/panel.cpp
 )
-target_compile_features(opendeck_core PUBLIC cxx_std_20)
-target_include_directories(opendeck_core PUBLIC native/include PRIVATE native/private)
+target_link_libraries(opendeck_core PUBLIC opendeck_dialect)
+target_include_directories(opendeck_core
+    PUBLIC native/include
+    PRIVATE native/private
+)
 set_target_properties(opendeck_core PROPERTIES
     CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON
@@ -33,30 +51,82 @@ if(BUILD_TESTING)
     endforeach()
     target_include_directories(native_input PRIVATE native/private)
 
-    set(contract_source "${CMAKE_CURRENT_SOURCE_DIR}/native/tests/contracts.cpp")
-    try_compile(contracts_compile
-        SOURCES "${contract_source}"
-        CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CMAKE_CURRENT_SOURCE_DIR}/native/include"
+    set(public_include_dir "${CMAKE_CURRENT_SOURCE_DIR}/native/include")
+    function(check_contract probe expected_error)
+        set(definitions)
+        if(NOT probe STREQUAL "VALID")
+            list(APPEND definitions -DOPENDECK_NEGATIVE_${probe})
+        endif()
+        try_compile(compiles
+            SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/native/tests/contracts.cpp"
+            NO_CACHE
+            CMAKE_FLAGS
+                "-DINCLUDE_DIRECTORIES=${public_include_dir}"
+            COMPILE_DEFINITIONS ${definitions}
+            LINK_LIBRARIES opendeck_dialect
+            OUTPUT_VARIABLE output
+        )
+        if(probe STREQUAL "VALID")
+            if(NOT compiles)
+                message(FATAL_ERROR
+                    "The valid contracts example must compile:\n${output}"
+                )
+            endif()
+        elseif(compiles OR NOT output MATCHES "${expected_error}")
+            message(FATAL_ERROR
+                "The ${probe} probe must fail for its contract violation:\n"
+                "${output}"
+            )
+        endif()
+    endfunction()
+
+    check_contract(VALID "")
+    check_contract(ABSTRACT "abstract")
+    check_contract(METHOD "no member named 'take'")
+    check_contract(SIGNATURE "marked 'override'")
+
+    try_compile(older_standard_compiles
+        SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/native/tests/older_standard.cpp"
+        NO_CACHE
+        CMAKE_FLAGS
+            "-DINCLUDE_DIRECTORIES=${public_include_dir}"
         CXX_STANDARD 20
         CXX_STANDARD_REQUIRED ON
         CXX_EXTENSIONS OFF
-        OUTPUT_VARIABLE contract_output
+        OUTPUT_VARIABLE older_standard_output
     )
-    if(NOT contracts_compile)
-        message(FATAL_ERROR "The valid contracts example must compile:\n${contract_output}")
-    endif()
-
-    foreach(probe IN ITEMS ABSTRACT METHOD SIGNATURE)
-        try_compile(contracts_${probe}_compile
-            SOURCES "${contract_source}"
-            CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CMAKE_CURRENT_SOURCE_DIR}/native/include"
-            COMPILE_DEFINITIONS -DOPENDECK_NEGATIVE_${probe}
-            CXX_STANDARD 20
-            CXX_STANDARD_REQUIRED ON
-            CXX_EXTENSIONS OFF
+    if(older_standard_compiles)
+        message(FATAL_ERROR
+            "Public headers must reject older C++ language modes"
         )
-        if(contracts_${probe}_compile)
-            message(FATAL_ERROR "The invalid ${probe} contracts example must fail to compile")
-        endif()
-    endforeach()
+    endif()
+    if(NOT older_standard_output MATCHES "OpenDeck requires C[+][+]2d")
+        message(FATAL_ERROR
+            "The older-mode probe failed for an unexpected reason:\n"
+            "${older_standard_output}"
+        )
+    endif()
+    get_filename_component(clang_directory "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set(consumer_binary "${CMAKE_CURRENT_BINARY_DIR}/mixed-consumer")
+    set(consumer_c_compiler
+        "${clang_directory}/clang${CMAKE_EXECUTABLE_SUFFIX}"
+    )
+    set(consumer_executable
+        "${consumer_binary}/native_mixed_consumer${CMAKE_EXECUTABLE_SUFFIX}"
+    )
+    add_test(NAME native_mixed_consumer
+        COMMAND "${CMAKE_CTEST_COMMAND}"
+            --build-and-test
+                "${CMAKE_CURRENT_SOURCE_DIR}/native/tests/mixed_consumer"
+                "${consumer_binary}"
+            --build-generator "${CMAKE_GENERATOR}"
+            --build-makeprogram "${CMAKE_MAKE_PROGRAM}"
+            --build-options
+                "-DOPENDECK_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+                "-DCMAKE_C_COMPILER=${consumer_c_compiler}"
+                "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+                "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+            --test-command "${consumer_executable}"
+    )
+    message(STATUS "Verified C++2d mode and contract compile-failure probes")
 endif()

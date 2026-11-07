@@ -4,6 +4,8 @@
 #include <set>
 #include <string>
 
+static_assert(__cplusplus >= 202700L, "OpenDeck requires C++2d (C++29 draft) or newer");
+
 namespace opendeck {
 
 struct Slot {
