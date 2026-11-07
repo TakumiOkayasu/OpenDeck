@@ -23,7 +23,11 @@ device = [
 opendeck = "opendeck.cli:main"
 
 [dependency-groups]
-dev = ["pytest", "ruff"]
+dev = [
+    "pybind11==3.1.0",
+    "pytest",
+    "ruff",
+]
 
 [tool.uv]
 cache-keys = [

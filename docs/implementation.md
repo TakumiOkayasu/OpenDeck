@@ -45,6 +45,10 @@ AppleClang・MSVC・GCC・clang-clは今回の構成では受け付けない。
 
 エディタもLLVM clangd 23以上を利用する。
 [.clangd](../.clangd)でnativeのC++ファイルだけにdraft modeを指定し、Cソースには適用しない。
+同じ設定で `build/clangd/compile_commands.json` を参照し、実際のtargetのinclude検索pathを使う。
+databaseはcore・契約テスト・Python bindingを有効にして専用configureで生成する。
+pybind11は開発用依存にも固定し、build isolationの一時ディレクトリを参照しない。
+生成と更新の手順は[READMEのC++エディタ設定](../README.md#cエディタの設定)に置く。
 エディタが更新前の解析状態を保持している場合は、使用するclangdを確認して言語サーバーを再起動する。
 
 言語更新に伴う製品コードの整理は `std::ranges::contains`・`std::ranges::includes` の利用に限定する。

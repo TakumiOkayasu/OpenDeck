@@ -32,6 +32,13 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pytest
       - run: uv run opendeck --help
+      - name: Check clangd compilation database
+        shell: bash
+        run: |
+          uv run python tools/configure_clangd.py
+          clangd --check=native/src/runtime.cpp
+          clangd --check=native/python/module.cpp
+          clangd --check=native/tests/contracts.cpp
       - name: Build and test the standalone C++ core
         run: |
           cmake -S . -B build/core -DOPENDECK_BUILD_PYTHON=OFF -DCMAKE_BUILD_TYPE=Debug

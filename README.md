@@ -42,6 +42,26 @@ Pythonは `.python-version` に従ってuvが選択する。初回はツール�
 `mise exec -- uv sync` はscikit-build-coreを通じてnative extensionをビルドする。
 native配下やCMakeLists.txtも再ビルド判定に含めているため、C++の変更後も同じsyncを実行する。
 
+### C++エディタの設定
+
+セットアップ後、clangd用のcompile_commands.jsonを生成する。
+
+```sh
+mise exec -- uv run python tools/configure_clangd.py
+```
+
+[.clangd](.clangd)が `build/clangd/compile_commands.json` を参照する。
+core・テスト・Python bindingを含めてconfigureし、プロジェクトのincludeと、
+開発用 `.venv` のpybind11・Pythonのheader検索pathを取得する。
+`build/core` はPythonを無効にしているため、binding用のdatabaseには使わない。
+CMake設定・依存・Python環境を変えた後は上記コマンドを再実行する。
+生成ファイルは環境固有なのでcommitしない。
+
+エディタが使うclangdもLLVM 23以上を指定し、言語サーバーを再起動する。
+`mise exec -- clangd --version` はターミナル側の確認であり、エディタの実行pathも確認する。
+診断確認は `mise exec -- clangd --check=native/src/runtime.cpp` と
+`mise exec -- clangd --check=native/python/module.cpp` で行える。
+
 ## ボタン操作
 
 ```sh
