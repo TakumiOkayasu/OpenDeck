@@ -10,9 +10,13 @@ import pybind11
 
 def main():
     root = Path(__file__).resolve().parents[1]
-    ninja = shutil.which("ninja.exe" if sys.platform == "win32" else "ninja")
+    suffix = ".exe" if sys.platform == "win32" else ""
+    ninja = shutil.which(f"ninja{suffix}")
     if ninja is None:
         raise SystemExit("Ninja not found. Run with mise exec --.")
+    compiler = shutil.which(f"clang++{suffix}")
+    if compiler is None:
+        raise SystemExit("LLVM Clang not found. Run with mise exec --.")
     subprocess.run(
         [
             "cmake",
@@ -24,6 +28,7 @@ def main():
             "-G",
             "Ninja",
             f"-DCMAKE_MAKE_PROGRAM={ninja}",
+            f"-DCMAKE_CXX_COMPILER={compiler}",
             "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
             "-DCMAKE_BUILD_TYPE=Debug",
             "-DOPENDECK_BUILD_PYTHON=ON",
