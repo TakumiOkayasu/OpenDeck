@@ -144,6 +144,40 @@ def test_cleanup_occurs_after_open_failure():
     assert source.attached == []
 
 
+@pytest.mark.parametrize("registered", [False, True])
+def test_cleanup_occurs_after_observer_registration_failure(registered: bool) -> None:
+    calls: list[str] = []
+    failure = ConnectionError("registration failed")
+
+    class FailingSource(TrackedSource):
+        def add(self, observer: Observer) -> None:
+            calls.append("add")
+            if registered:
+                super().add(observer)
+            raise failure
+
+        def remove(self, observer: Observer) -> None:
+            calls.append("remove")
+            Source.remove(self, observer)
+            if observer in self.attached:
+                self.attached.remove(observer)
+
+    class Link(ports.Link):
+        def open(self) -> None:
+            pytest.fail("Input must not open after registration fails")
+
+        def close(self) -> None:
+            calls.append("close")
+
+    source = FailingSource()
+    with pytest.raises(ConnectionError) as captured:
+        _execute(Product(Link(), source, source), Binding({}), False)
+
+    assert captured.value is failure
+    assert calls == ["add", "close", "remove"]
+    assert source.attached == []
+
+
 @pytest.mark.parametrize("failure", [None, "factory", "open", "input", "close"])
 def test_run_debug_logging_is_temporary(
     tmp_path: Path,
@@ -385,4 +419,144 @@ def test_startup_and_cleanup_errors_are_both_preserved():
         "startup failed",
         "cleanup failed",
     ]
+    assert source.attached == []
+
+
+@pytest.mark.parametrize("stage", ["add", "open", "run"])
+def test_operation_and_all_cleanup_errors_are_preserved(stage: str) -> None:
+    calls: list[str] = []
+    failure = RuntimeError(f"{stage} failed")
+    close_failure = OSError("close failed")
+    remove_failure = RuntimeError("remove failed")
+    slot = Slot("primary")
+
+    class FailingSource(TrackedSource):
+        def add(self, observer: Observer) -> None:
+            super().add(observer)
+            if stage == "add":
+                raise failure
+
+        def remove(self, observer: Observer) -> None:
+            calls.append("remove")
+            super().remove(observer)
+            raise remove_failure
+
+    class Link(ports.Link):
+        def open(self) -> None:
+            if stage == "open":
+                raise failure
+            source.start()
+            source.publish(slot)
+
+        def close(self) -> None:
+            calls.append("close")
+            source.close()
+            raise close_failure
+
+    class Action(ports.Action):
+        def run(self) -> Result:
+            raise failure
+
+    source = FailingSource()
+    with pytest.raises(ExceptionGroup) as captured:
+        _execute(Product(Link(), source, source), Binding({slot: Action()}), False)
+
+    assert captured.value.exceptions == (failure, close_failure, remove_failure)
+    assert calls == ["close", "remove"]
+    assert source.attached == []
+
+
+@pytest.mark.parametrize("interrupt_in", ["close", "remove"])
+@pytest.mark.parametrize("through_cli", [False, True])
+def test_cleanup_interrupt_does_not_mask_original_failure(
+    interrupt_in: str,
+    through_cli: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls: list[str] = []
+    failure = RuntimeError("startup failed")
+    close_failure = (
+        KeyboardInterrupt("close interrupted")
+        if interrupt_in == "close"
+        else OSError("close failed")
+    )
+    remove_failure = (
+        KeyboardInterrupt("remove interrupted")
+        if interrupt_in == "remove"
+        else RuntimeError("remove failed")
+    )
+
+    class FailingSource(TrackedSource):
+        def remove(self, observer: Observer) -> None:
+            calls.append("remove")
+            super().remove(observer)
+            raise remove_failure
+
+    class Link(ports.Link):
+        def open(self) -> None:
+            raise failure
+
+        def close(self) -> None:
+            calls.append("close")
+            raise close_failure
+
+    source = FailingSource()
+    product = Product(Link(), source, source)
+    if through_cli:
+        config, _ = files(tmp_path, [str(tmp_path / "unused-program")])
+
+        class Factory(ports.Factory):
+            def __init__(self, *_args: object) -> None:
+                pass
+
+            def make(self) -> Product:
+                return product
+
+        monkeypatch.setattr(streamdock, "StreamDockFactory", Factory)
+        assert main(["run", str(config)]) == 1
+        output = capsys.readouterr()
+        assert output.out == ""
+        for error in (failure, close_failure, remove_failure):
+            assert str(error) in output.err
+    else:
+        with pytest.raises(BaseException) as captured:
+            _execute(product, Binding({}), False)
+        assert isinstance(captured.value, BaseExceptionGroup)
+        assert captured.value.exceptions == (failure, close_failure, remove_failure)
+
+    assert calls == ["close", "remove"]
+    assert source.attached == []
+
+
+@pytest.mark.parametrize("interrupt_in", ["close", "remove"])
+def test_single_cleanup_interrupt_is_not_a_normal_stop(interrupt_in: str) -> None:
+    calls: list[str] = []
+    interrupt = KeyboardInterrupt(f"{interrupt_in} interrupted")
+
+    class InterruptingSource(TrackedSource):
+        def remove(self, observer: Observer) -> None:
+            calls.append("remove")
+            super().remove(observer)
+            if interrupt_in == "remove":
+                raise interrupt
+
+    class Link(ports.Link):
+        def open(self) -> None:
+            source.start()
+
+        def close(self) -> None:
+            calls.append("close")
+            source.close()
+            if interrupt_in == "close":
+                raise interrupt
+
+    source = InterruptingSource()
+    with pytest.raises(BaseException) as captured:
+        _execute(Product(Link(), source, source), Binding({}), False)
+
+    assert isinstance(captured.value, BaseExceptionGroup)
+    assert captured.value.exceptions == (interrupt,)
+    assert calls == ["close", "remove"]
     assert source.attached == []
