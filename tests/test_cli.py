@@ -11,24 +11,25 @@ from pathlib import Path
 
 import pytest
 
+from opendeck import ports
 from opendeck.adapters import streamdock
 from opendeck.bindings import Binding
 from opendeck.cli import _execute, main
 from opendeck.model import Result, Slot, Status
-from opendeck.ports import Product
+from opendeck.ports import Observer, Product
 from opendeck.source import Source
 
 
 class TrackedSource(Source[Slot]):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.attached = []
+        self.attached: list[Observer] = []
 
-    def add(self, observer):
+    def add(self, observer: Observer) -> None:
         super().add(observer)
         self.attached.append(observer)
 
-    def remove(self, observer):
+    def remove(self, observer: Observer) -> None:
         super().remove(observer)
         self.attached.remove(observer)
 
@@ -127,14 +128,14 @@ def test_malformed_events_fail_without_execution(tmp_path, capsys):
 
 def test_cleanup_occurs_after_open_failure():
     source = TrackedSource()
-    calls = []
+    calls: list[str] = []
 
-    class Link:
-        def open(self):
+    class Link(ports.Link):
+        def open(self) -> None:
             calls.append("open")
             raise ConnectionError("failed")
 
-        def close(self):
+        def close(self) -> None:
             calls.append("close")
 
     with pytest.raises(ConnectionError):
@@ -154,7 +155,7 @@ def test_run_debug_logging_is_temporary(
     source = TrackedSource()
     adapter_logger = logging.getLogger(streamdock.__name__)
 
-    class Link:
+    class Link(ports.Link):
         def open(self) -> None:
             adapter_logger.debug("startup")
             if failure == "open":
@@ -170,7 +171,7 @@ def test_run_debug_logging_is_temporary(
             if failure == "close":
                 raise RuntimeError("close failed")
 
-    class Input:
+    class Input(ports.Input[Slot]):
         def take(self) -> Slot | None:
             value = source.take()
             if value is None:
@@ -179,7 +180,7 @@ def test_run_debug_logging_is_temporary(
                 raise KeyboardInterrupt
             return value
 
-    class Factory:
+    class Factory(ports.Factory):
         def __init__(self, *_args: object) -> None:
             pass
 
@@ -277,7 +278,7 @@ def test_readiness_is_flushed_only_after_successful_live_open(
         else ""
     )
 
-    class Link:
+    class Link(ports.Link):
         def open(self) -> None:
             calls.append("open")
             assert stderr.getvalue() == ""
@@ -288,7 +289,7 @@ def test_readiness_is_flushed_only_after_successful_live_open(
         def close(self) -> None:
             calls.append("close")
 
-    class Input:
+    class Input(ports.Input[Slot]):
         def take(self) -> Slot | None:
             assert stderr.getvalue() == expected
             assert stderr.flushed is live
@@ -344,20 +345,20 @@ def test_keyboard_interrupt_preserves_previous_operation_failure():
     source = TrackedSource()
     slot = Slot("failed")
 
-    class Link:
-        def open(self):
+    class Link(ports.Link):
+        def open(self) -> None:
             source.start()
             source.publish(slot)
 
-        def close(self):
+        def close(self) -> None:
             source.close()
 
-    class Action:
-        def run(self):
+    class Action(ports.Action):
+        def run(self) -> Result:
             return Result(Status.FAILED)
 
-    class Input:
-        def take(self):
+    class Input(ports.Input[Slot]):
+        def take(self) -> Slot | None:
             value = source.take()
             if value is None:
                 raise KeyboardInterrupt
@@ -371,11 +372,11 @@ def test_keyboard_interrupt_preserves_previous_operation_failure():
 def test_startup_and_cleanup_errors_are_both_preserved():
     source = TrackedSource()
 
-    class Link:
-        def open(self):
+    class Link(ports.Link):
+        def open(self) -> None:
             raise ConnectionError("startup failed")
 
-        def close(self):
+        def close(self) -> None:
             raise RuntimeError("cleanup failed")
 
     with pytest.raises(ExceptionGroup) as captured:

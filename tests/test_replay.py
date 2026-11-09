@@ -1,3 +1,4 @@
+from opendeck import ports
 from opendeck.adapters.replay import Edge, ReplayFactory
 from opendeck.bindings import Binding
 from opendeck.model import Result, Slot, Status
@@ -8,8 +9,8 @@ def test_finite_replay_length_does_not_cause_artificial_live_queue_overflow():
     slot = Slot("repeated")
     calls = []
 
-    class Action:
-        def run(self):
+    class Action(ports.Action):
+        def run(self) -> Result:
             calls.append(None)
             return Result(Status.DONE)
 

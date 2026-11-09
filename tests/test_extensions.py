@@ -24,7 +24,7 @@ def test_registered_action_uses_existing_input_binding_and_execution(status: Sta
     built: list[Mapping[str, object]] = []
 
     @dataclass(frozen=True)
-    class Message:
+    class Message(Action):
         text: str
 
         def run(self) -> Result:
@@ -115,7 +115,7 @@ def test_same_kind_builds_each_definition_once_including_unbound_actions():
     built: list[Action] = []
 
     @dataclass(frozen=True)
-    class NamedAction:
+    class NamedAction(Action):
         name: str
 
         def run(self) -> Result:
@@ -163,7 +163,7 @@ def test_cli_reports_each_result_and_retains_failure_after_later_success(
     results = iter(expected)
     calls: list[Result] = []
 
-    class ChangingAction:
+    class ChangingAction(Action):
         def run(self) -> Result:
             result = next(results)
             calls.append(result)

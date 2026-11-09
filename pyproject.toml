@@ -49,7 +49,7 @@ BUILD_TESTING = "OFF"
 testpaths = ["tests"]
 
 [tool.pyright]
-include = ["src", "tests"]
+include = ["src", "tests", "tools"]
 extraPaths = ["src"]
 exclude = [".venv", "vendor"]
 # Excluded SDK files should not emit diagnostics even when opened in the editor.
