@@ -41,7 +41,7 @@ def _parser() -> argparse.ArgumentParser:
 def _execute(product: Product, binding: Binding, live: bool) -> int:
     wake = Wake()
     exit_code = 0
-    failure: Exception | None = None
+    errors: list[BaseException] = []
 
     def report(slot: Slot, result: Result | None) -> None:
         nonlocal exit_code
@@ -53,8 +53,8 @@ def _execute(product: Product, binding: Binding, live: bool) -> int:
         if result is not None and result.status is not Status.DONE:
             exit_code = 1
 
-    product.subject.add(wake)
     try:
+        product.subject.add(wake)
         product.link.open()
         if live:
             print(
@@ -70,21 +70,19 @@ def _execute(product: Product, binding: Binding, live: bool) -> int:
                 break
     except KeyboardInterrupt:
         pass
-    except Exception as error:
-        failure = error
+    except BaseException as error:
+        errors.append(error)
     finally:
-        try:
-            product.link.close()
-        except Exception as error:
-            failure = (
-                error
-                if failure is None
-                else ExceptionGroup("Operation and cleanup failed", [failure, error])
-            )
-        finally:
-            product.subject.remove(wake)
-    if failure is not None:
-        raise failure
+        for cleanup in (product.link.close, lambda: product.subject.remove(wake)):
+            try:
+                cleanup()
+            except BaseException as error:
+                errors.append(error)
+    # Cleanup interrupts must not reach main as a normal Ctrl+C stop.
+    if len(errors) == 1 and not isinstance(errors[0], KeyboardInterrupt):
+        raise errors[0]
+    if errors:
+        raise BaseExceptionGroup("Operation and cleanup failed", errors)
     return exit_code
 
 
@@ -131,7 +129,13 @@ def main(argv: list[str] | None = None) -> int:
         return _execute(factory.make(), settings.binding, args.command == "run")
     except KeyboardInterrupt:
         return 0
-    except (OSError, ValueError, RuntimeError, ImportError, ExceptionGroup) as error:
+    except (
+        OSError,
+        ValueError,
+        RuntimeError,
+        ImportError,
+        BaseExceptionGroup,
+    ) as error:
         print(f"opendeck: {_error_text(error)}", file=sys.stderr)
         return 1
     finally:
