@@ -39,8 +39,9 @@ AppleClang・MSVC・GCC・clang-clは今回の構成では受け付けない。
 ビルドの要求がdraft modeへ戻っていないことも検証する。
 
 エディタもLLVM clangd 23以上を利用する。
-[.clangd](../.clangd)でnativeのC++ファイルだけにC++23を指定し、Cソースには適用しない。
-同じ設定で `build/clangd/compile_commands.json` を参照し、実際のtargetのinclude検索pathを使う。
+[.clangd](../.clangd)でnativeのC++ファイルの解析用databaseを指定する。
+`build/clangd/compile_commands.json` から、実際のtargetの言語モードとinclude検索pathを使う。
+エディタ独自の言語モード指定でコマンドを上書きせず、CソースにもC++用flagを追加しない。
 databaseはcore・契約テスト・Python bindingを有効にして専用configureで生成する。
 pybind11は開発用依存にも固定し、build isolationの一時ディレクトリを参照しない。
 生成と更新の手順は[READMEのC++エディタ設定](../README.md#cエディタの設定)に置く。
@@ -398,7 +399,10 @@ C++23での正例の成功、契約負例3種とC++20の意図した拒否も確
 各OSでeditable環境のpytest 202件、native CTest 4件、clangdの3ファイルのエラー0件、
 sdist/wheel作成とcheckout外からの隔離import・CLIを確認した。
 Python 3.15指定のPyrightでsrcのエラー・警告はなかった。
-全体検査のテスト側48件は、Python 3.14指定でも同件数を再現する既存のABC未継承に関する診断であり、今回変更していない。
+その言語更新時点では、全体検査のテスト側にABC未継承に関する診断が48件残っていた。
+Python 3.14指定でも同件数を再現しており、言語更新による新規診断ではなかった。
+後続の診断修正では、通常のfakeを必要なABCへ適合し、意図的な非継承型の検証は維持した。
+Pyrightの対象にはsrc・tests・toolsを含め、Windowsの全体検査でエラー・警告0件を確認した。
 今回の言語更新では実機の検証を行っていない。過去の実機情報は後述の記録を維持する。
 各OSのCI結果とN4 Pro実機の適合確認は分ける。
 CIにはWindows・macOS・Linuxでeditable環境のpytest、native CTest、sdist/wheel作成とwheelの分離インストールを定義する。

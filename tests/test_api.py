@@ -24,7 +24,7 @@ def test_application_receives_virtual_keys_through_public_input_contract():
     primary, secondary = Slot("primary"), Slot("secondary")
     pending = iter((primary, secondary, primary))
 
-    class Provider:
+    class Provider(Input[Slot]):
         def take(self) -> Slot | None:
             return next(pending, None)
 
@@ -41,7 +41,7 @@ def test_application_changes_key_configuration_without_changing_adaptation():
     primary = Slot("primary")
     calls: list[str] = []
 
-    class Operation:
+    class Operation(Action):
         def __init__(self, name: str) -> None:
             self.name = name
 
@@ -96,7 +96,7 @@ def test_application_observes_chord_input_without_physical_state():
     chord = Chord(frozenset({primary, secondary}), together)
     notifications: list[None] = []
 
-    class Listener:
+    class Listener(Observer):
         def on_change(self) -> None:
             notifications.append(None)
 
@@ -121,7 +121,7 @@ def test_application_observes_chord_input_without_physical_state():
 
 
 def test_generic_input_is_not_fixed_to_virtual_keys_or_numeric_values():
-    class Reader:
+    class Reader(Input[tuple[str, bool]]):
         def take(self) -> tuple[str, bool]:
             return ("available", True)
 

@@ -51,6 +51,7 @@ mise exec -- uv run python tools/configure_clangd.py
 ```
 
 [.clangd](.clangd)が `build/clangd/compile_commands.json` を参照する。
+言語モードもCMakeが生成した各targetのコマンドに従い、エディタだけの設定で上書きしない。
 core・テスト・Python bindingを含めてconfigureし、プロジェクトのincludeと、
 開発用 `.venv` のpybind11・Pythonのheader検索pathを取得する。
 `build/core` はPythonを無効にしているため、binding用のdatabaseには使わない。
@@ -58,6 +59,9 @@ CMake設定・依存・Python環境を変えた後は上記コマンドを再実
 生成ファイルは環境固有なのでcommitしない。
 
 エディタが使うclangdもLLVM 23以上を指定し、言語サーバーを再起動する。
+Project Diagnosticsで公開headerが見つからない場合も、まずdatabaseを生成・更新する。
+設定済みでも古い診断が残る場合は、Zedの `editor: restart language server` を実行する。
+Pythonの依存をsyncした後にimportの古い診断が残る場合も、対象の言語サーバーを再起動する。
 `mise exec -- clangd --version` はターミナル側の確認であり、エディタの実行pathも確認する。
 診断確認は `mise exec -- clangd --check=native/src/runtime.cpp` と
 `mise exec -- clangd --check=native/python/module.cpp` で行える。

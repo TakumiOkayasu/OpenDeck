@@ -1,15 +1,16 @@
 from opendeck.bindings import Binding
 from opendeck.model import Result, Slot, Status
+from opendeck.ports import Action
 from opendeck.runtime import Wake, drain
 from opendeck.source import Source
 
 
-class CountingAction:
-    def __init__(self, status=Status.DONE):
+class CountingAction(Action):
+    def __init__(self, status: Status = Status.DONE) -> None:
         self.calls = 0
         self.status = status
 
-    def run(self):
+    def run(self) -> Result:
         self.calls += 1
         return Result(self.status)
 

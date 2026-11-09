@@ -5,7 +5,17 @@ from typing import cast
 
 import pytest
 
-from opendeck import Button, ButtonFactory, Change, Chord, Input, InputError, Read, Slot
+from opendeck import (
+    Button,
+    ButtonFactory,
+    Change,
+    Chord,
+    Input,
+    InputError,
+    Observer,
+    Read,
+    Slot,
+)
 from opendeck.adapters.replay import Edge, ReplayFactory
 
 
@@ -98,10 +108,10 @@ def test_late_observer_is_notified_of_pending_changes_and_can_be_removed():
     slot = Slot("primary")
     product = ReplayFactory({1: slot}, (), (Edge(1, True),)).make_buttons()
     button = product.buttons[slot]
-    calls = []
+    calls: list[None] = []
 
-    class Listener:
-        def on_change(self):
+    class Listener(Observer):
+        def on_change(self) -> None:
             calls.append(None)
 
     listener = Listener()

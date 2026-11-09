@@ -13,7 +13,7 @@ from unittest.mock import patch
 from opendeck.adapters import streamdock
 from opendeck.adapters.streamdock import StreamDockError, StreamDockFactory
 from opendeck.model import Chord, Slot
-from opendeck.ports import ButtonProduct, Product
+from opendeck.ports import ButtonProduct, Observer, Product
 from opendeck.source import InputError
 
 
@@ -120,15 +120,15 @@ class FakeManager:
         return self.devices
 
 
-class Wake:
-    def __init__(self):
+class Wake(Observer):
+    def __init__(self) -> None:
         self.event = threading.Event()
 
-    def on_change(self):
+    def on_change(self) -> None:
         self.event.set()
 
 
-class CallbackObserver:
+class CallbackObserver(Observer):
     def __init__(self, callback: Callable[[], None]) -> None:
         self.callback = callback
 

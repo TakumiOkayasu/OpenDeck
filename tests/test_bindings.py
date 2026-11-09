@@ -1,12 +1,14 @@
 from dataclasses import FrozenInstanceError
+from typing import cast
 
 import pytest
 
 from opendeck.bindings import Binding
 from opendeck.model import Result, Slot, Status
+from opendeck.ports import Action
 
 
-class Operation:
+class Operation(Action):
     def run(self) -> Result:
         raise AssertionError("Selecting an action must not execute it")
 
@@ -36,7 +38,8 @@ def test_selection_preserves_the_supplied_action() -> None:
             return Result(Status.DONE)
 
     action = Operation()
-    bindings = Binding({Slot("launch"): action})
+    # Keep the legacy duck-typed object: runtime adaptation must preserve identity.
+    bindings = Binding({Slot("launch"): cast(Action, action)})
     selected = bindings.select(Slot("launch"))
 
     assert selected is action

@@ -2,10 +2,11 @@ from threading import Event, Lock, Thread
 
 import pytest
 
+from opendeck.ports import Observer
 from opendeck.source import InputError, Source
 
 
-class Counter:
+class Counter(Observer):
     def __init__(self) -> None:
         self.calls = 0
 
@@ -50,7 +51,7 @@ def test_notification_allows_reentrant_take_and_remove_without_deadlock() -> Non
     source = Source[str]()
     received: list[str | None] = []
 
-    class Reader:
+    class Reader(Observer):
         def on_change(self) -> None:
             received.append(source.take())
             source.remove(self)
@@ -124,7 +125,7 @@ def test_close_between_notification_and_take_prevents_stale_delivery() -> None:
     source = Source[str]()
     received: list[str | None] = []
 
-    class ClosingReader:
+    class ClosingReader(Observer):
         def on_change(self) -> None:
             source.close()
             received.append(source.take())
@@ -147,7 +148,7 @@ def test_concurrent_close_clears_input_before_a_delayed_observer_consumes() -> N
     resume = Event()
     received: list[str | None] = []
 
-    class DelayedReader:
+    class DelayedReader(Observer):
         def on_change(self) -> None:
             notified.set()
             if resume.wait(timeout=2):
@@ -170,7 +171,7 @@ def test_staged_notification_runs_outside_the_callers_lock() -> None:
     adapter_lock = Lock()
     received: list[str | None] = []
 
-    class Reader:
+    class Reader(Observer):
         def on_change(self) -> None:
             assert adapter_lock.acquire(blocking=False), "Adapter lock is still held"
             try:
@@ -192,7 +193,7 @@ def test_close_after_enqueue_before_notification_prevents_stale_delivery() -> No
     source = Source[str]()
     received: list[str | None] = []
 
-    class Reader:
+    class Reader(Observer):
         def on_change(self) -> None:
             received.append(source.take())
 
