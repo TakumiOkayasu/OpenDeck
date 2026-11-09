@@ -145,6 +145,7 @@ mise exec -- uv run python examples/button_state.py
 - [全体仕様](docs/requirements.md)
 - [拡張利用の要件案](docs/requirements/extensions.md)
 - [拡張ホストの基本設計案](docs/design/extensions.md)
+- [拡張ホストの設計・実装プラン](docs/plans/extension-host.md)
 - [配布拡張の互換性調査](docs/compatibility/streamdock.md)
 - [ボタン操作の基本設計](docs/design.md)
 - [ボタン入力の要件](docs/requirements/buttons.md)
