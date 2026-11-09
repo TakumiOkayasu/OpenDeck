@@ -156,6 +156,6 @@ mise exec -- uv run python examples/button_state.py
 
 ## ライセンス
 
-MIT
+[MIT](./LICENSE)
 
 SDKは `submodule` 内のライセンスに従う。
