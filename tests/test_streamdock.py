@@ -96,20 +96,26 @@ class FakeN4Pro:
             self.callback(self, event(key, state, event_type))
 
     def emit_packet(self, code: int, state: int) -> None:
+        if not (1 <= code <= 15 or 0x40 <= code <= 0x43):
+            raise ValueError("Fake packet decoder only models buttons and UNKNOWN")
         self.emit_raw(input_packet(code, state))
-        # Reproduce the SDK's image-map-derived IDs, not the intended input IDs.
+        # Match the pinned decoder and reader: UNKNOWN has no key callback.
+        if state not in (0, 1) or 11 <= code <= 15:
+            return
+        if 0x40 <= code <= 0x43 and state != 0:
+            return
         sdk_key = {
             1: 11,
             2: 12,
             3: 13,
             4: 14,
             5: 15,
-            0x40: 11,
-            0x41: 12,
-            0x42: 13,
-            0x43: 14,
+            0x40: 1,
+            0x41: 2,
+            0x42: 3,
+            0x43: 4,
         }.get(code, code)
-        self.emit(sdk_key, int(state == 1))
+        self.emit(sdk_key, state)
 
 
 class FakeManager:
@@ -540,19 +546,89 @@ class StreamDockTests(unittest.TestCase):
         self.assertIsNone(product.input.take())
 
     def test_touch_release_does_not_release_a_regular_button(self):
+        for code in range(1, 5):
+            with self.subTest(code=code):
+                device = FakeN4Pro()
+                product = self.make(
+                    [device], keys={code: Slot("primary"), code + 10: Slot("touch")}
+                )
+                product.link.open()
+                try:
+                    device.emit_packet(code, 1)
+                    device.emit_packet(0x3F + code, 0)
+                    self.assertIsNone(product.input.take())
+                    device.emit_packet(code, 0)
+                    self.assertEqual(product.input.take(), Slot("primary"))
+                    self.assertIsNone(product.input.take())
+                finally:
+                    product.link.close()
+
+    def test_touch_release_preserves_regular_button_state_and_history(self):
+        for code in range(1, 5):
+            with self.subTest(code=code):
+                device = FakeN4Pro()
+                product = self.make(
+                    [device],
+                    keys={code: Slot("primary"), code + 10: Slot("touch")},
+                    buttons=True,
+                )
+                button = product.buttons[Slot("primary")]
+                product.link.open()
+                try:
+                    device.emit_packet(code, 1)
+                    start = button.take()
+                    assert start is not None
+                    self.assertTrue(start.pressed)
+                    device.emit_packet(0x3F + code, 0)
+                    self.assertTrue(button.read())
+                    self.assertIsNone(button.take())
+                    touch = product.buttons[Slot("touch")]
+                    self.assertFalse(touch.read())
+                    self.assertIsNone(touch.take())
+                    device.emit_packet(code, 0)
+                    self.assertFalse(button.read())
+                    release = button.take()
+                    assert release is not None
+                    self.assertFalse(release.pressed)
+                    self.assertIsNone(button.take())
+                finally:
+                    product.link.close()
+
+    def test_secondary_release_keeps_its_existing_adapted_identifier(self):
+        for code in range(1, 5):
+            with self.subTest(code=code):
+                device = FakeN4Pro()
+                product = self.make(
+                    [device], keys={code: Slot("primary"), code + 10: Slot("touch")}
+                )
+                product.link.open()
+                try:
+                    # Seed a decoded-only input, not a physical touch-press claim.
+                    device.emit(code + 10, 1)
+                    device.emit_packet(0x3F + code, 0)
+                    self.assertEqual(product.input.take(), Slot("touch"))
+                    self.assertIsNone(product.input.take())
+                finally:
+                    product.link.close()
+
+    def test_sdk_filtered_packets_do_not_publish_or_corrupt_the_next_input(self):
         device = FakeN4Pro()
         product = self.make([device], keys={1: Slot("primary"), 11: Slot("touch")})
         product.link.open()
         self.addCleanup(product.link.close)
+        filtered = (
+            *((code, 1) for code in range(0x40, 0x44)),
+            *((code, 0) for code in range(11, 16)),
+            (1, 9),
+        )
+        for code, state in filtered:
+            with self.subTest(code=code, state=state):
+                device.emit_packet(code, state)
+                self.assertIsNone(product.input.take())
         device.emit_packet(1, 1)
-        device.emit_packet(0x40, 0)
         self.assertIsNone(product.input.take())
         device.emit_packet(1, 0)
         self.assertEqual(product.input.take(), Slot("primary"))
-        self.assertIsNone(product.input.take())
-        device.emit_packet(0x40, 1)
-        device.emit_packet(0x40, 0)
-        self.assertEqual(product.input.take(), Slot("touch"))
         self.assertIsNone(product.input.take())
 
     def test_packet_context_is_consumed_by_its_decoded_event(self):
@@ -565,6 +641,37 @@ class StreamDockTests(unittest.TestCase):
         device.emit(2, 0)
         self.assertEqual(product.input.take(), Slot("secondary"))
         device.emit_packet(1, 0)
+        self.assertEqual(product.input.take(), Slot("primary"))
+        self.assertIsNone(product.input.take())
+
+    def test_non_input_packet_cannot_rewrite_a_decoded_button(self):
+        for offset in (0, 5):
+            with self.subTest(offset=offset):
+                device = FakeN4Pro()
+                product = self.make(
+                    [device], keys={1: Slot("primary"), 11: Slot("touch")}
+                )
+                product.link.open()
+                try:
+                    packet = bytearray(input_packet(0x40, 0))
+                    packet[offset] = 0
+                    device.emit_raw(bytes(packet))
+                    device.emit(1, 1)
+                    device.emit(1, 0)
+                    self.assertEqual(product.input.take(), Slot("primary"))
+                    self.assertIsNone(product.input.take())
+                finally:
+                    product.link.close()
+
+    def test_ignored_callback_consumes_its_secondary_packet_context(self):
+        device = FakeN4Pro()
+        product = self.make([device], keys={1: Slot("primary"), 11: Slot("touch")})
+        product.link.open()
+        self.addCleanup(product.link.close)
+        device.emit_raw(input_packet(0x40, 0))
+        device.emit(1, 0, "knob")
+        device.emit(1, 1)
+        device.emit(1, 0)
         self.assertEqual(product.input.take(), Slot("primary"))
         self.assertIsNone(product.input.take())
 

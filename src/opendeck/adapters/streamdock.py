@@ -248,12 +248,16 @@ class _Link(Link):
                     len(data) >= 11
                     and data[:3] == b"ACK"
                     and data[5:7] == b"OK"
-                    and 1 <= data[9] <= 10
+                    and (1 <= data[9] <= 10 or 0x40 <= data[9] <= 0x43)
                 ):
-                    # N4 Pro regular-button report IDs differ from image IDs.
-                    key = data[9]
+                    # Keep regular and secondary inputs separate from SDK image IDs.
+                    code = data[9]
+                    key = code if code <= 10 else code - 0x40 + 11
                     _LOGGER.debug(
-                        "N4 Pro button input: report=%d SDK=%d", key, event.key.value
+                        "N4 Pro button input: report=%d input=%d SDK=%d",
+                        code,
+                        key,
+                        event.key.value,
                     )
             slot = self._keys.get(key)
             if slot is None:
