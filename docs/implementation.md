@@ -326,7 +326,12 @@ CLIは通知登録の試行前から、入力元の解放とObserverの解除を
 
 SDKは[MiraboxSpace/StreamDock-Device-SDK](https://github.com/MiraboxSpace/StreamDock-Device-SDK)を
 `git submodule` として `vendor/streamdock-sdk` へ配置し、
-リビジョン `7f0d47fe91033b0883edf29b574a6c74ea9bed00` へ固定する。SDKのファイルは変更しない。
+リビジョン `fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb` へ固定する。SDKのファイルは変更しない。
+
+この更新にはC++ SDKのreader起床・self-join・初期化の修正と、Python SDKの入力番号・画像処理の変更がある。
+OpenDeckのC++ coreは機器SDKをリンクせず、接続には引き続きPython SDKを使う。
+C++ SDK側のworker修正を、現行のPython接続経路へ適用済みとは扱わない。
+画像・GIF・起動ロゴのAPIは今回の利用範囲に追加しない。
 
 SDKとnative transport libraryは、StreamDockFactory.makeまたはlist_devicesで機器を列挙する時に読み込む。中核処理、再生入力、純粋関数のテストをimportするだけでSDKやDLLを読み込まない。makeは列挙して製品を生成するが機器をopenしない。SDK側はTransportDLLを自分のモジュール位置から探すため、そのディレクトリ構成を保って読み込む。
 
@@ -347,17 +352,24 @@ SDKのkey callbackではEventType.BUTTONのイベントを受け付ける。取�
 入力パケットのヘッダーは `ACK..OK`、byte9は通常ボタンのrawコード1から10、byte10は押下 `01`・解放 `00` だった（byte位置は0始まり）。
 これは通常ボタンの入力番号であり、SDKの画像配置用インデックスではない。
 
-固定SDKの `StreamDockN4Pro.decode_input_event` は画像配置マップを誤って逆引きし、raw1から5をSDKキー11から15へ、
-raw6から10を同じ6から10へ変換する。
-サンプルの `device.keys` は1・2なので、観測した通常ボタン操作はいずれも設定に一致せず無視された。サンプルの番号は変更せず、入力側で補正する。
+旧SDK `7f0d47f` は画像配置マップの逆引きで、通常ボタンのraw1から5をSDKキー11から15へ変換していた。
+現行の固定SDKは入力マップを明示したが、raw1から5をSDKキー11から15へ、raw6から10を同じ6から10へ変換する点は同じである。
+過去にサンプルの `device.keys` の1・2と一致せず無視された原因と、通常ボタンの補正は引き続き区別して扱う。
+サンプルや利用者の設定番号をSDKの画像配置へ合わせて変更しない。
 
 アダプタはSDKのraw callbackでパケットを記録し、同じreader thread・同じ接続世代のkey callbackに対応付ける。
 対応する通常ボタンのrawコード1から10を、SDKの画像配置由来のキー番号より優先して入力識別子に使う。
 認識・配送はkey callbackから一回だけ行い、raw callbackから二重に配送しない。SDKファイルは変更しない。
 
-副画面のrawコード `0x40` から `0x43` と他種別のイベントには通常ボタンの補正を適用せず、従来のSDKデコード・型フィルターを保つ。
-raw `0x40` のタッチ入力もSDKキー11になるため、SDKの11を一律に1へ変換すると通常ボタン1と衝突する。
-設定可能な識別子1から15は、すべてが同じ押下・解放の通知列を持つ保証ではない。副画面の実際の押下・解放・保持・重複は未確認で、解放などのイベントを合成しない。
+副画面のrawコード `0x40` から `0x43` は、旧SDKではSDKキー11から14、更新後はSDKキー1から4となる。
+アダプタは対応するrawコードがある場合に入力識別子11から14へ適合し、通常ボタン1から4との衝突を防ぐ。
+rawと対応付かないSDKキーを一律に逆変換せず、他種別のイベントは従来どおり受け付けない。
+
+更新後のSDKは副画面のstateが0以外の場合、不正なstate、未対応のrawコードをUNKNOWNへ分類する。
+readerはraw callback後にUNKNOWNを除外し、key callbackを呼ばない。
+これらから押下や解放を合成せず、副画面入力だけで通常ボタンの保持を解除したり単発操作を成立させたりしない。
+設定可能な識別子1から15は、すべてが同じ押下・解放の通知列を持つ保証ではない。
+副画面の実際の押下・解放・保持・重複は実機での確認に残す。
 
 機器の取り外しは、停止可能な独自のポーリング処理でtransportの列挙結果を0.5秒間隔で調べる。SDKのDeviceManager.listenは停止条件を持たないループなので利用しない。SDKのreadがNoneを返すことだけでは切断と判定しない。接続管理の同期と古いcallbackを無効にする処理は接続実装内に置く。
 
@@ -375,14 +387,14 @@ SDKのreader、heartbeat、独自の監視threadが停止したことを確認�
 
 | 確認した箇所 | 事実と実装判断 |
 | --- | --- |
-| [SDK概要](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/7f0d47fe91033b0883edf29b574a6c74ea9bed00/docs/readme.en.md#L34-L68) | Python/C++のWindows/macOS対応が記載される。今回の実測済み対応範囲とは分ける |
-| [N4 Pro decoder](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/7f0d47fe91033b0883edf29b574a6c74ea9bed00/Python-SDK/src/StreamDock/Devices/StreamDockN4Pro.py#L129-L164) | 通常キーと副画面入力をBUTTONに分類するが、通常キーの番号に画像配置マップの逆引きを使う。上記の補正はアダプタ内に限定し、副画面の通知列は実機確認に残す |
-| [reader](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/7f0d47fe91033b0883edf29b574a6c74ea9bed00/Python-SDK/src/StreamDock/Devices/StreamDock.py#L499-L538) | reader threadが個別イベントを取得し、key callbackを呼ぶ。上位の実行をcallbackで待たない |
-| [openとinit](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/7f0d47fe91033b0883edf29b574a6c74ea9bed00/Python-SDK/src/StreamDock/Devices/StreamDock.py#L152-L177) | openは失敗時にFalseを返す。initは機器への複数の設定を行う。接続と初期化の成否を分ける |
-| [close](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/7f0d47fe91033b0883edf29b574a6c74ea9bed00/Python-SDK/src/StreamDock/Devices/StreamDock.py#L210-L285) | notify=Falseで切断通知書き込みを抑える。readerとheartbeatを停止・待機するが、transport.closeの例外は内部でprintして捕捉する |
-| [heartbeat worker](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/7f0d47fe91033b0883edf29b574a6c74ea9bed00/Python-SDK/src/StreamDock/Devices/StreamDock.py#L591-L610) | loop内で10秒sleepする。正常な終了の待機に必要な時間として扱う |
-| [DeviceManager](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/7f0d47fe91033b0883edf29b574a6c74ea9bed00/Python-SDK/src/StreamDock/DeviceManager.py) | enumerate、製品別の機器生成、hotplug監視がある。停止制御のためlistenを直接使わない |
-| [native transport loader](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/7f0d47fe91033b0883edf29b574a6c74ea9bed00/Python-SDK/src/StreamDock/Transport/LibUSBHIDAPI.py#L61-L161) | OS・architecture別library名を選び、モジュール直下のTransportDLLからimport時に読み込む |
+| [SDK概要](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/docs/readme.en.md#L34-L68) | Python/C++のWindows/macOS対応が記載される。今回の実測済み対応範囲とは分ける |
+| [N4 Pro decoder](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDockN4Pro.py#L135-L162) | 入力マップは同ファイル32行目以降。通常キーと副画面の番号差をアダプタへ閉じ、UNKNOWNからイベントを合成しない |
+| [reader](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDock.py#L561-L610) | reader threadでraw callback、デコード、UNKNOWNの除外、key callbackの順に処理する。上位の実行をcallbackで待たない |
+| [openとinit](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDock.py#L154-L181) | openは失敗時にFalseを返す。initは機器への複数の設定を行う。接続と初期化の成否を分ける |
+| [close](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDock.py#L216-L291) | notify=Falseで切断通知書き込みを抑える。readerとheartbeatを停止・待機するが、transport.closeの例外は内部でprintして捕捉する |
+| [heartbeat worker](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDock.py#L653-L676) | loop内で10秒sleepする。正常な終了の待機に必要な時間として扱う |
+| [DeviceManager](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/DeviceManager.py) | enumerate、製品別の機器生成、hotplug監視がある。停止制御のためlistenを直接使わない |
+| [native transport loader](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Transport/LibUSBHIDAPI.py#L61-L161) | OS・architecture別library名を選び、モジュール直下のTransportDLLからimport時に読み込む |
 
 ## 検証の区分
 
@@ -420,6 +432,16 @@ Pyrightの対象にはsrc・tests・toolsを含め、Windowsの全体検査で�
 CIにはWindows・macOS・Linuxでeditable環境のpytest、native CTest、sdist/wheel作成とwheelの分離インストールを定義する。
 sdistはビルドに必要なnativeソースを含み、vendorは含めない。wheelのimportとCLIはcheckoutへ依存しない隔離モードで確認する。
 CIの構成を、まだ得ていない各OSの実行結果やN4 Pro実機の適合保証とは扱わない。
+
+SDK `fc124cb` への更新では、Windows・CPython 3.15.2でpytest 218件、Ruff、
+Pyrightのエラー・警告0件、standalone coreのReleaseのCTest 4件を確認した。
+副画面4コードによる通常ボタンの誤解放をRedで再現してから、アダプタの補正でGreenにした。
+保持・履歴、入力識別、除外されたパケット、ヘッダーとcallbackの対応の追加回帰は、補正後に初めからGreenだった。
+入力アダプタ47件は、fakeのデコードを固定SDKの実際のデコーダーへ差し替えても成功した。
+これは取得と接続をfakeにした確認であり、SDK readerや機器の通知列の実測ではない。
+SDKの読込みと列挙の呼出しは成功したが、N4 Proは列挙されず、このリビジョンでの実機入力は未確認である。
+macOS・Linux・新しいwheelの実行結果も今回のローカル確認には含めない。
+
 ビルド・実行コマンドは[README](../README.md)と[作業規約](../AGENTS.md#確認コマンド)を参照する。
 
 bindingの境界は[pybind11の仮想関数](https://pybind11.readthedocs.io/en/stable/advanced/classes.html)、
