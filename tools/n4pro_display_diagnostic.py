@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import json
+import platform
+import subprocess
 import sys
 import time
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TextIO
 
 from PIL import Image, ImageDraw
 
@@ -38,37 +41,107 @@ def make_image(label: str, size: tuple[int, int]) -> bytes:
     return output.getvalue()
 
 
-def draw_images(product: SurfaceProduct, images: dict[Slot, int]) -> None:
+def write_record(output: TextIO, kind: str, **fields: object) -> None:
+    record = {
+        "type": kind,
+        "time": datetime.now().astimezone().isoformat(timespec="milliseconds"),
+        **fields,
+    }
+    output.write(json.dumps(record, ensure_ascii=False) + "\n")
+    output.flush()
+
+
+def revision(path: Path) -> str | None:
+    try:
+        root = subprocess.check_output(
+            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        if Path(root).resolve() != path.resolve():
+            return None
+        return subprocess.check_output(
+            ["git", "-C", str(path), "rev-parse", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except OSError, subprocess.CalledProcessError:
+        return None
+
+
+def draw_images(
+    product: SurfaceProduct, images: dict[Slot, int], output: TextIO
+) -> None:
     product.screen.draw(make_image("BG", (800, 480)))
+    write_record(output, "image_sent", target="background")
     print("Background sent; physical completion is unconfirmed.", flush=True)
     input("Press Enter to send button and panel images: ")
     for slot, number in images.items():
         size = (112, 112) if number <= 10 else (176, 112)
         product.images[slot].draw(make_image(f"D{number}", size))
+        write_record(output, "image_sent", target=str(slot), label=f"D{number}")
         print(f"Sent image D{number} to display target {number}", flush=True)
 
 
-def record_inputs(product: SurfaceProduct) -> None:
-    print("Recording; test one operation at a time. Ctrl+C stops.", flush=True)
-    while True:
-        for kind, source in (("input", product.input), ("touch", product.touch)):
-            while (event := source.take()) is not None:
-                stamp = datetime.now().astimezone().isoformat(timespec="milliseconds")
-                print(f"{stamp} {kind} {event!r}", flush=True)
+def drain_inputs(product: SurfaceProduct, output: TextIO, step: str | None) -> None:
+    while (slot := product.input.take()) is not None:
+        write_record(output, "button", step=step, slot=str(slot))
+    while (event := product.touch.take()) is not None:
+        if hasattr(event, "x"):
+            write_record(output, "touch", step=step, x=event.x, y=event.y)
+        else:
+            write_record(output, "swipe", step=step, direction=str(event.direction))
+
+
+def capture_step(
+    product: SurfaceProduct, output: TextIO, step: str, seconds: float
+) -> None:
+    drain_inputs(product, output, None)
+    write_record(output, "step_start", step=step)
+    print(f"GO: {step}", flush=True)
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        drain_inputs(product, output, step)
         time.sleep(0.05)
+    write_record(output, "step_end", step=step)
 
 
-def run(product: SurfaceProduct, images: dict[Slot, int]) -> None:
-    product.link.open()
+def record_inputs(product: SurfaceProduct, output: TextIO) -> None:
+    steps = [
+        ("touch_top_left", "Touch top left"),
+        ("touch_top_right", "Touch top right"),
+        ("touch_center", "Touch center"),
+        ("touch_bottom_left", "Touch bottom left"),
+        ("touch_bottom_right", "Touch bottom right"),
+        ("swipe_left", "Swipe left"),
+        ("swipe_right", "Swipe right"),
+        *[(f"button_{n}", f"Press button {n} in reading order") for n in range(1, 11)],
+    ]
+    for step, instruction in steps:
+        input(f"Press Enter, then {instruction} after GO (5 seconds): ")
+        capture_step(product, output, step, 5)
+
+
+def run(product: SurfaceProduct, images: dict[Slot, int], output: TextIO) -> None:
     try:
-        input("Press Enter to send background BG (observe before continuing): ")
-        draw_images(product, images)
-        input("Observe the images; press Enter to record inputs, Ctrl+C to stop: ")
-        record_inputs(product)
+        product.link.open()
+        try:
+            input("Press Enter to send background BG (observe before continuing): ")
+            draw_images(product, images, output)
+            input("Observe the images; press Enter to record inputs: ")
+            record_inputs(product, output)
+        finally:
+            product.link.close()
     except KeyboardInterrupt:
+        write_record(output, "stopped")
         print("\nStopped.", flush=True)
-    finally:
-        product.link.close()
+    except Exception as error:
+        write_record(
+            output, "error", error_type=type(error).__name__, message=str(error)
+        )
+        raise
+    else:
+        write_record(output, "finished")
 
 
 def main() -> None:
@@ -78,13 +151,35 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sdk", type=Path, default=Path("vendor/streamdock-sdk"))
     parser.add_argument("--device-index", type=int)
+    parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
+    filename = datetime.now().strftime("n4pro-diagnostic-%Y%m%d-%H%M%S-%f.jsonl")
+    path = args.output or Path(filename)
 
     # Separate identities ensure image targets never stand in for input events.
     inputs = {n: Slot(f"input-{n}") for n in range(1, 16)}
     images = {Slot(name): n for name, n in targets().items()}
-    factory = StreamDockFactory(inputs, (), args.sdk, args.device_index)
-    run(factory.make_surface(images), images)
+    with path.open("x", encoding="utf-8") as output:
+        print(f"Recording to {path}", flush=True)
+        write_record(
+            output,
+            "session",
+            schema_version=1,
+            platform=platform.platform(),
+            python=platform.python_version(),
+            revision=revision(Path.cwd()),
+            sdk_revision=revision(args.sdk),
+            device_index=args.device_index,
+        )
+        try:
+            factory = StreamDockFactory(inputs, (), args.sdk, args.device_index)
+            product = factory.make_surface(images)
+        except Exception as error:
+            write_record(
+                output, "error", error_type=type(error).__name__, message=str(error)
+            )
+            raise
+        run(product, images, output)
 
 
 if __name__ == "__main__":
