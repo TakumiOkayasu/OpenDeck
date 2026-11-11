@@ -158,6 +158,7 @@ mise exec -- uv run python examples/button_state.py
 - [拡張ホストの基本設計案](docs/design/extensions.md)
 - [拡張ホストの設計・実装プラン](docs/plans/extension-host.md)
 - [配布拡張の互換性調査](docs/compatibility/streamdock.md)
+- [N4 Proの画像表示とタッチ入力の調査](docs/research/n4pro-display-touch.md)
 - [ボタン操作の基本設計](docs/design.md)
 - [ボタン入力の要件](docs/requirements/buttons.md)
 - [回転入力の要件](docs/requirements/rotation.md)
