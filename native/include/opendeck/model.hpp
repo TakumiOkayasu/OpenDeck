@@ -19,6 +19,19 @@ struct Change {
     bool operator==(const Change &) const = default;
 };
 
+struct TouchPoint {
+    int x;
+    int y;
+    bool operator==(const TouchPoint &) const = default;
+};
+
+enum class Direction { left, right };
+
+struct Swipe {
+    Direction direction;
+    bool operator==(const Swipe &) const = default;
+};
+
 struct Chord {
     std::set<Slot> members;
     Slot slot;

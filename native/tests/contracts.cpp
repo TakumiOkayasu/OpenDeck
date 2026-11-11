@@ -36,6 +36,7 @@ static_assert(std::is_abstract_v<Observer>);
 static_assert(std::is_abstract_v<Subject>);
 static_assert(std::is_abstract_v<Button>);
 static_assert(std::is_abstract_v<Action>);
+static_assert(std::is_abstract_v<View>);
 static_assert(std::is_abstract_v<Link>);
 static_assert(std::is_abstract_v<Factory<int>>);
 static_assert(std::is_abstract_v<Factory<Product>>);
@@ -55,6 +56,7 @@ static_assert(std::has_virtual_destructor_v<Observer>);
 static_assert(std::has_virtual_destructor_v<Subject>);
 static_assert(std::has_virtual_destructor_v<Button>);
 static_assert(std::has_virtual_destructor_v<Action>);
+static_assert(std::has_virtual_destructor_v<View>);
 static_assert(std::has_virtual_destructor_v<Link>);
 static_assert(std::has_virtual_destructor_v<Factory<int>>);
 

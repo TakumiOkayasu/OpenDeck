@@ -12,6 +12,22 @@ class Change:
 
 
 @dataclass(frozen=True, slots=True)
+class TouchPoint:
+    x: int
+    y: int
+
+
+class Direction(StrEnum):
+    LEFT = "left"
+    RIGHT = "right"
+
+
+@dataclass(frozen=True, slots=True)
+class Swipe:
+    direction: Direction
+
+
+@dataclass(frozen=True, slots=True)
 class Chord:
     members: frozenset[Slot]
     slot: Slot
