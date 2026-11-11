@@ -140,14 +140,7 @@ mise exec -- ctest --test-dir build/core -C Release --output-on-failure
 アプリや拡張は、公開された `Input[Slot]` から仮想キーの発生を受け取る。
 物理入力との対応は下位で適合し、操作の割り当ては上位の `Binding` で扱う。
 公開import、責務と追加手順は[アプリケーション・拡張の実装ガイド](docs/extensions.md)を参照。
-SDK・実機・外部アプリの起動を必要としない例も実行できる。
-
-```sh
-mise exec -- uv run python examples/extension.py
-mise exec -- uv run python examples/button_state.py
-```
-
-前者は独自Actionの登録と実行、後者は現在状態と開始・終了の履歴を別の能力として取得する例。
+SDK・実機・外部アプリを必要としない実行例も[実装ガイド](docs/extensions.md#実行できる最小例)に置く。
 
 ## ドキュメント
 
@@ -163,6 +156,7 @@ mise exec -- uv run python examples/button_state.py
 - [ボタン入力の要件](docs/requirements/buttons.md)
 - [回転入力の要件](docs/requirements/rotation.md)
 - [ボタン能力の基本設計](docs/design/buttons.md)
+- [表示とタッチ入力の設計](docs/design/display.md)
 - [入力APIの対応計画](docs/plans/input-api.md)
 - [実装設計・SDKの適合・実機確認](docs/implementation.md)
 - [アプリケーション・拡張の実装ガイド](docs/extensions.md)
