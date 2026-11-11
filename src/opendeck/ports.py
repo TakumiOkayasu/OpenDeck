@@ -5,7 +5,7 @@ from types import MappingProxyType
 from typing import cast
 
 from . import _native as core  # pyright: ignore[reportMissingModuleSource]
-from .model import Change, Result, Slot
+from .model import Change, Result, Slot, Swipe, TouchPoint
 
 InputError = core.InputError
 
@@ -42,6 +42,11 @@ class Action(ABC):
     def run(self) -> Result: ...
 
 
+class View(ABC):
+    @abstractmethod
+    def draw(self, image: bytes) -> None: ...
+
+
 class Link(ABC):
     @abstractmethod
     def open(self) -> None: ...
@@ -64,6 +69,20 @@ class ButtonProduct:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "buttons", MappingProxyType(dict(self.buttons)))
+
+
+@dataclass(frozen=True, slots=True)
+class SurfaceProduct:
+    link: Link
+    input: Input[Slot]
+    subject: Subject
+    touch: Input[TouchPoint | Swipe]
+    touch_subject: Subject
+    images: Mapping[Slot, View]
+    screen: View
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "images", MappingProxyType(dict(self.images)))
 
 
 class Factory(ABC):

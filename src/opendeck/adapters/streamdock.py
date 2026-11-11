@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import importlib
 import logging
 import sys
@@ -5,12 +7,24 @@ import threading
 import warnings
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from time import monotonic
 from typing import Any
 
-from ..model import Chord, Slot
-from ..ports import ButtonFactory, ButtonProduct, Factory, Link, Observer, Product
+from ..model import Chord, Direction, Slot, Swipe, TouchPoint
+from ..ports import (
+    ButtonFactory,
+    ButtonProduct,
+    Factory,
+    Input,
+    InputError,
+    Link,
+    Observer,
+    Product,
+    SurfaceProduct,
+    View,
+)
 from ..recognition import validate_adaptation
 from ..source import Source
 from .inputs import Panel, Receiver, Signals
@@ -121,6 +135,29 @@ class StreamDockFactory(Factory, ButtonFactory):
         device, button = self._select()
         return ButtonProduct(_Link(device, button, self._keys, panel), panel.buttons)
 
+    def make_surface(self, images: Mapping[Slot, int]) -> SurfaceProduct:
+        if any(type(key) is not int or not 1 <= key <= 14 for key in images.values()):
+            raise ValueError("N4 Pro image inputs must be integers from 1 through 14")
+        device, button = self._select()
+        source = Source[Slot]()
+        touch = Source[TouchPoint | Swipe]()
+        link = _Link(device, button, self._keys, Signals(source, self._chords), touch)
+        views = {
+            slot: _Display(
+                link, key + 10 if key <= 5 else key if key <= 10 else key - 10
+            )
+            for slot, key in images.items()
+        }
+        return SurfaceProduct(
+            link,
+            source.input,
+            source.subject,
+            _TouchInput(link, touch.input),
+            touch.subject,
+            views,
+            _Display(link),
+        )
+
     def _select(self) -> tuple[Any, Any]:
         sdk = _load(self._sdk_path)
         devices = _devices(sdk)
@@ -142,6 +179,28 @@ class StreamDockFactory(Factory, ButtonFactory):
         return device, sdk.button
 
 
+class _Display(View):
+    def __init__(self, link: _Link, key: int | None = None) -> None:
+        self._link = link
+        self._key = key
+
+    def draw(self, image: bytes) -> None:
+        self._link.draw(image, self._key)
+
+
+class _TouchInput(Input[TouchPoint | Swipe]):
+    def __init__(self, link: _Link, input: Input[TouchPoint | Swipe]) -> None:
+        self._link = link
+        self._input = input
+
+    def take(self) -> TouchPoint | Swipe | None:
+        with self._link._lock:
+            event = self._input.take()
+            if not self._link._active:
+                raise InputError("Touch input is not connected")
+            return event
+
+
 class _Link(Link):
     def __init__(
         self,
@@ -149,11 +208,13 @@ class _Link(Link):
         button: Any,
         keys: Mapping[int, Slot],
         receiver: Receiver,
+        touch: Source[TouchPoint | Swipe] | None = None,
     ):
         self._device = device
         self._button = button
         self._keys = keys
         self._receiver = receiver
+        self._touch = touch
         self._lock = threading.RLock()
         self._lifecycle = threading.Lock()
         self._stop = threading.Event()
@@ -162,7 +223,24 @@ class _Link(Link):
         self._opened = False
         self._generation = 0
         self._raw_registered = False
+        self._touch_registered = False
         self._reader_context = _ReaderContext()
+
+    def draw(self, image: bytes, key: int | None) -> None:
+        if not isinstance(image, bytes):
+            raise TypeError("Image must be encoded bytes")
+        with self._lifecycle:
+            with self._lock:
+                if not self._active:
+                    raise StreamDockError("N4 Pro is not connected")
+            data = BytesIO(image)
+            result = (
+                self._device.set_frame_background(data)
+                if key is None
+                else self._device.set_key_image(key, data)
+            )
+            if (key is None and result == -1) or (key is not None and result != 0):
+                raise StreamDockError("SDK could not draw image")
 
     def open(self) -> None:
         notifications: tuple[Observer, ...] = ()
@@ -181,6 +259,11 @@ class _Link(Link):
                         lambda device, data: self._receive_raw(generation, data)
                     )
                     self._raw_registered = True
+                    if self._touch is not None:
+                        self._touch_registered = True
+                        self._device.set_touchscreen_callback(
+                            lambda device, event: self._receive_touch(generation, event)
+                        )
                     _LOGGER.debug("Opening N4 Pro")
                     if not self._device.open():
                         raise StreamDockError("SDK could not open the selected N4 Pro")
@@ -192,6 +275,8 @@ class _Link(Link):
                     )
                     with self._lock:
                         self._receiver.start()
+                        if self._touch is not None:
+                            self._touch.start()
                         self._active = True
                         self._opened = True
                     self._stop.clear()
@@ -230,6 +315,20 @@ class _Link(Link):
 
     def _receive(self, generation: int, event: Any) -> None:
         _LOGGER.debug("SDK decoded input: %r", event)
+        event_type = getattr(event.event_type, "value", event.event_type)
+        if self._touch is not None and event_type == "swipe":
+            packet = self._reader_context.packet
+            if packet is not None and packet[0] == generation:
+                self._reader_context.packet = None
+            try:
+                direction = Direction(
+                    getattr(event.direction, "value", event.direction)
+                )
+            except (AttributeError, ValueError) as error:
+                self._fail(generation, StreamDockError(f"Invalid swipe: {error}"))
+                return
+            self._publish_touch(generation, Swipe(direction))
+            return
         notifications: tuple[Observer, ...] = ()
         with self._lock:
             packet = self._reader_context.packet
@@ -280,6 +379,27 @@ class _Link(Link):
                     notifications = self._receiver.record_failure(error)
         Source.notify(notifications)
 
+    def _receive_touch(self, generation: int, event: Any) -> None:
+        x, y = getattr(event, "x", None), getattr(event, "y", None)
+        if type(x) is not int or type(y) is not int or x < 0 or y < 0:
+            self._fail(generation, StreamDockError("Invalid touch coordinates"))
+            return
+        self._publish_touch(generation, TouchPoint(x, y))
+
+    def _publish_touch(self, generation: int, event: TouchPoint | Swipe) -> None:
+        if self._touch is None:
+            return
+        with self._lock:
+            if not self._active or generation != self._generation:
+                return
+            accepted, observers = self._touch.enqueue(event)
+            if not accepted:
+                self._active = False
+                observers += self._receiver.record_failure(
+                    StreamDockError("Touch input could not be queued")
+                )
+        Source.notify(observers)
+
     def _watch(self, generation: int) -> None:
         while not self._stop.wait(_POLL_INTERVAL):
             try:
@@ -305,13 +425,19 @@ class _Link(Link):
                 return
             self._active = False
             observers = self._receiver.record_failure(error)
+            if self._touch is not None:
+                observers += self._touch.record_failure(error)
         Source.notify(observers)
 
     def _invalidate(self, error: Exception | None = None) -> tuple[Observer, ...]:
         with self._lock:
             self._active = False
             self._generation += 1
-            return self._receiver.close(error)
+            observers = self._receiver.close(error)
+            if self._touch is not None:
+                observers += self._touch.record_failure(error or "Touch input closed")
+                self._touch.close()
+            return observers
 
     def close(self) -> None:
         notifications: tuple[Observer, ...] = ()
@@ -353,6 +479,12 @@ class _Link(Link):
             self._device.set_key_callback(None)
         except Exception as error:
             errors.append(error)
+        if self._touch_registered:
+            try:
+                self._device.set_touchscreen_callback(None)
+                self._touch_registered = False
+            except Exception as error:
+                errors.append(error)
         if self._raw_registered:
             try:
                 self._device.set_raw_read_callback(None)

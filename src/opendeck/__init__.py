@@ -1,7 +1,7 @@
 """Device-independent operations for a configurable control surface."""
 
 from .bindings import Binding
-from .model import Change, Chord, Result, Slot, Status
+from .model import Change, Chord, Direction, Result, Slot, Status, Swipe, TouchPoint
 from .ports import (
     Action,
     Button,
@@ -12,6 +12,8 @@ from .ports import (
     Observer,
     Read,
     Subject,
+    SurfaceProduct,
+    View,
     input_view,
     read_view,
     subject_view,
@@ -25,6 +27,7 @@ __all__ = [
     "ButtonProduct",
     "Change",
     "Chord",
+    "Direction",
     "Input",
     "InputError",
     "Observer",
@@ -33,6 +36,10 @@ __all__ = [
     "Slot",
     "Status",
     "Subject",
+    "SurfaceProduct",
+    "Swipe",
+    "TouchPoint",
+    "View",
     "input_view",
     "read_view",
     "subject_view",

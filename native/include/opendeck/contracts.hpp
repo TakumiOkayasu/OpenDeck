@@ -2,9 +2,11 @@
 
 #include "opendeck/model.hpp"
 
+#include <cstddef>
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 
 namespace opendeck {
@@ -48,6 +50,12 @@ class Action {
 public:
     virtual ~Action() = default;
     virtual Result run() = 0;
+};
+
+class View {
+public:
+    virtual ~View() = default;
+    virtual void draw(std::span<const std::byte> image) = 0;
 };
 
 class Link {
