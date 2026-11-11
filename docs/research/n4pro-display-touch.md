@@ -19,13 +19,13 @@ SDKのサイズは画像変換の入力キャンバスであり、上記だけ�
 [Pillowによる変換](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/ImageHelpers/PILHelper.py)は、
 サイズを合わせ、180度回転し、静止画をエンコードする。
 ボタン画像はPNG対応設定でも、アルファ情報がなければJPEG、あればPNGを選ぶ。
-透過を持つ画像をJPEGへ変換する場合は黒背景へ合成する。動的背景のフレームはJPEGである。
+透過を含む画像をJPEGへ変換する場合は黒背景へ合成する。動的背景のフレームはJPEGである。
 ファイルとして読み込める形式はPillowのデコーダーに依存するため、入力形式の全種類をハードウェアの対応形式とは扱わない。
 アニメーションは別の機構であり、静止画の描画だけでアニメーションを提供したとはしない。
 
 `set_touchscreen_image`は名前に反して起動ロゴのROM書込みであり、SDK自身が繰り返しの描画に使用しないよう説明している。
 動的表示は`set_frame_background` / `set_background_frame_stream`の経路を調べる。
-フレーム送信はPython wrapperから成否を取得できず、呼出しが戻っただけでは実機の表示完了を保証できない。
+フレーム送信はPython wrapperから成否を取得できず、呼び出しが戻っただけでは実機の表示完了を保証できない。
 [SDKの実装](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDock.py#L324-L366)
 と[ROM書込みの注意](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDock.py#L505-L521)を参照。
 
@@ -50,4 +50,4 @@ Wikiには座標列と右スワイプが記録されているが、左スワイ�
 - 登録・解除、開始中のイベント、切断、終了後の遅れた通知をfakeで検証する。
 - 再生やfakeでの成功と、N4 Proの実機で画像が表示されること・タッチ座標と表示位置が一致することを区別する。
 
-入力データの型、表示先の識別、画像の受渡しと出力結果の型、描画の所有期間は、利用例から最小限に定める。
+入力データの型、表示先の識別、画像の受け渡しと出力結果の型、描画の所有期間は、利用例から最小限に定める。
