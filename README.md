@@ -3,6 +3,10 @@
 Mirabox N4 Proの入力を、機器から独立した操作へ割り当てる個人用ソフトウェア。
 Windowsでの利用を先行し、OSと機器に接する実装を交換できる構成にする。
 
+このプロジェクトは、ハードウェアの情報を抽象化した入力データとAPI・インターフェースを提供する。
+拡張作者はキー入力監視や機器との接続を実装せず、公開契約に従って操作の振る舞いを実装できる。
+個別の拡張機能と、基盤を利用する拡張ホストの検討は、基盤のAPI提供と分けて扱う。
+
 現在は、入力の認識・状態・履歴と、割り当てた操作の実行を提供する。アプリ起動は基盤を使う具体例として同梱する。
 外部拡張の読み込みと開始・終了の管理、設定画面と機器への描画はまだ提供していない。
 個別操作の仕様と開発予定は、それぞれの拡張側で管理する。
@@ -128,6 +132,8 @@ mise exec -- ctest --test-dir build/core -C Release --output-on-failure
 追加した操作も、機器入力・キーコンフィグの選択・実行処理を変更せずに割り当てられる。
 標準CLIが登録する操作は引き続き `launch` のみで、既存のJSON設定はそのまま利用できる。
 外部プラグインの自動探索や、ノブなど値を伴う入力への対応は含めない。
+押下・回転・押しながら回転を独立して割り当てる要求と、現行APIとの差分は
+[入力APIの対応計画](docs/plans/input-api.md)を参照。
 生成処理の契約と追加箇所は[操作の生成と登録](docs/implementation.md#操作の生成と登録)を参照。
 
 アプリや拡張は、公開された `Input[Slot]` から仮想キーの発生を受け取る。
@@ -153,7 +159,9 @@ mise exec -- uv run python examples/button_state.py
 - [配布拡張の互換性調査](docs/compatibility/streamdock.md)
 - [ボタン操作の基本設計](docs/design.md)
 - [ボタン入力の要件](docs/requirements/buttons.md)
+- [回転入力の要件](docs/requirements/rotation.md)
 - [ボタン能力の基本設計](docs/design/buttons.md)
+- [入力APIの対応計画](docs/plans/input-api.md)
 - [実装設計・SDKの適合・実機確認](docs/implementation.md)
 - [アプリケーション・拡張の実装ガイド](docs/extensions.md)
 
