@@ -102,23 +102,11 @@ SDKリビジョンを変更する場合は、適合と既存の回帰テスト�
 `mise exec --` を通してコンパイラとビルド環境を適用する。
 標準の確認コマンド:
 
-```sh
-mise exec -- uv sync --locked --all-extras
-mise exec -- uv run pytest
-mise exec -- uv run ruff check .
-mise exec -- uv run ruff format --check .
-git diff --check
-```
+依存の準備とPythonのテスト・lintは[READMEの実機なしの確認](README.md#実機なしの確認)を参照する。
+全オプションを含める場合は `mise exec -- uv sync --locked --all-extras` で準備する。
+文書を含む差分は `git diff --check` でも確認する。
 
-SDK・Python非依存のC++確認コマンド:
-
-```sh
-mise exec -- cmake -S . -B build/core -DOPENDECK_BUILD_PYTHON=OFF -DCMAKE_BUILD_TYPE=Release
-mise exec -- cmake --build build/core --config Release
-mise exec -- ctest --test-dir build/core -C Release --output-on-failure
-```
-
-古いgeneratorやcompilerのキャッシュがある場合、最初のconfigureに `--fresh` を付ける。
+SDK・Python非依存のC++確認コマンドも[README](README.md#実機なしの確認)に置く。
 nativeやCMakeLists.txtを変更した後は `mise exec -- uv sync` を行い、
 古いextensionでpytestを実行しない。
 契約のコンパイル負例は、環境やincludeの不備ではなく、意図した契約違反で失敗したことを確認する。
