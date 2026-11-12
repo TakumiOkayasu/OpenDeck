@@ -74,13 +74,13 @@ def draw_images(
 ) -> None:
     product.screen.draw(make_image("BG", (800, 480)))
     write_record(output, "image_sent", target="background")
-    print("Background sent; physical completion is unconfirmed.", flush=True)
-    input("Press Enter to send button and panel images: ")
+    print("背景画像を送信しました。実機に表示されたか確認してください。", flush=True)
+    input("Enterキーを押すとボタンと副画面の画像を送信します: ")
     for slot, number in images.items():
         size = (112, 112) if number <= 10 else (176, 112)
         product.images[slot].draw(make_image(f"D{number}", size))
         write_record(output, "image_sent", target=str(slot), label=f"D{number}")
-        print(f"Sent image D{number} to display target {number}", flush=True)
+        print(f"表示先 {number} に画像 D{number} を送信しました", flush=True)
 
 
 def drain_inputs(product: SurfaceProduct, output: TextIO, step: str | None) -> None:
@@ -98,7 +98,7 @@ def capture_step(
 ) -> None:
     drain_inputs(product, output, None)
     write_record(output, "step_start", step=step)
-    print(f"GO: {step}", flush=True)
+    print("開始: 案内された操作を行ってください (5秒間)", flush=True)
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         drain_inputs(product, output, step)
@@ -108,17 +108,23 @@ def capture_step(
 
 def record_inputs(product: SurfaceProduct, output: TextIO) -> None:
     steps = [
-        ("touch_top_left", "Touch top left"),
-        ("touch_top_right", "Touch top right"),
-        ("touch_center", "Touch center"),
-        ("touch_bottom_left", "Touch bottom left"),
-        ("touch_bottom_right", "Touch bottom right"),
-        ("swipe_left", "Swipe left"),
-        ("swipe_right", "Swipe right"),
-        *[(f"button_{n}", f"Press button {n} in reading order") for n in range(1, 11)],
+        ("touch_top_left", "タッチパネルの左上に触れる"),
+        ("touch_top_right", "タッチパネルの右上に触れる"),
+        ("touch_center", "タッチパネルの中央に触れる"),
+        ("touch_bottom_left", "タッチパネルの左下に触れる"),
+        ("touch_bottom_right", "タッチパネルの右下に触れる"),
+        ("swipe_left", "タッチパネルを右から左へなぞる ←"),
+        ("swipe_right", "タッチパネルを左から右へなぞる →"),
+        *[
+            (f"button_{n}", f"ボタン{n}を押す (左上から右へ数える)")
+            for n in range(1, 11)
+        ],
     ]
     for step, instruction in steps:
-        input(f"Press Enter, then {instruction} after GO (5 seconds): ")
+        input(
+            f"次の操作: {instruction}\n"
+            "Enterキーを押し、開始の表示後に操作してください: "
+        )
         capture_step(product, output, step, 5)
 
 
@@ -126,15 +132,15 @@ def run(product: SurfaceProduct, images: dict[Slot, int], output: TextIO) -> Non
     try:
         product.link.open()
         try:
-            input("Press Enter to send background BG (observe before continuing): ")
+            input("Enterキーを押すと背景画像 BG を送信します: ")
             draw_images(product, images, output)
-            input("Observe the images; press Enter to record inputs: ")
+            input("画像を確認し、Enterキーを押すと入力の記録を始めます: ")
             record_inputs(product, output)
         finally:
             product.link.close()
     except KeyboardInterrupt:
         write_record(output, "stopped")
-        print("\nStopped.", flush=True)
+        print("\n中断しました。", flush=True)
     except Exception as error:
         write_record(
             output, "error", error_type=type(error).__name__, message=str(error)
@@ -160,7 +166,7 @@ def main() -> None:
     inputs = {n: Slot(f"input-{n}") for n in range(1, 16)}
     images = {Slot(name): n for name, n in targets().items()}
     with path.open("x", encoding="utf-8") as output:
-        print(f"Recording to {path}", flush=True)
+        print(f"記録先: {path}", flush=True)
         write_record(
             output,
             "session",
@@ -186,5 +192,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as error:
-        print(f"Diagnostic failed: {error}", file=sys.stderr, flush=True)
+        print(f"診断に失敗しました: {error}", file=sys.stderr, flush=True)
         raise
