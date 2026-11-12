@@ -91,18 +91,14 @@ def draw_images(
 
 
 def drain_inputs(product: SurfaceProduct, output: TextIO, step: str | None) -> None:
+    from opendeck import TouchPoint
+
     while (slot := product.input.take()) is not None:
         write_record(output, "button", step=step, slot=str(slot))
     while (event := product.touch.take()) is not None:
-        if hasattr(event, "x"):
+        if isinstance(event, TouchPoint):
             write_record(output, "touch", step=step, x=event.x, y=event.y)
-            # TODO: fix it
-            # Cannot access attribute "x", "y" for class "Swipe"
-            #   Attribute "x", "y" is unknown
         else:
-            # TODO: fix it
-            # Cannot access attribute "direction" for class "TouchPoint"
-            #   Attribute "direction" is unknown
             write_record(output, "swipe", step=step, direction=str(event.direction))
 
 
@@ -181,12 +177,13 @@ def main() -> None:
         "--output", type=Path, default=Path(f"logs/diagnostics/{filename}")
     )
     args = parser.parse_args()
-    path = args.output or Path(filename) # TODO: default値があるので、ここの分岐は不要？
+    path = args.output
 
     # Separate identities ensure image targets never stand in for input events.
     inputs = {n: Slot(f"input-{n}") for n in range(1, 16)}
     images = {Slot(name): n for name, n in targets().items()}
 
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("x", encoding="utf-8") as output:
         print(f"記録先: {path}", flush=True)
         write_record(

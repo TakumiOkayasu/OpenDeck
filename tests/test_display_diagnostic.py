@@ -48,6 +48,28 @@ def test_drawing_targets_do_not_define_input_numbering():
     assert diagnostic.targets() == {f"display-{n}": n for n in range(1, 15)}
 
 
+def test_default_log_directory_is_created_on_first_run(monkeypatch, tmp_path):
+    import sys
+    from types import ModuleType, SimpleNamespace
+
+    opendeck = ModuleType("opendeck")
+    opendeck.Slot = str
+    adapter = ModuleType("opendeck.adapters.streamdock")
+    adapter.StreamDockFactory = lambda *args: SimpleNamespace(
+        make_surface=lambda _: object()
+    )
+    monkeypatch.setitem(sys.modules, "opendeck", opendeck)
+    monkeypatch.setitem(
+        sys.modules, "opendeck.adapters", ModuleType("opendeck.adapters")
+    )
+    monkeypatch.setitem(sys.modules, "opendeck.adapters.streamdock", adapter)
+    monkeypatch.setattr(sys, "argv", ["diagnostic"])
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(diagnostic, "run", lambda *_: None)
+    diagnostic.main()
+    assert len(list((tmp_path / "logs/diagnostics").glob("*.jsonl"))) == 1
+
+
 def test_diagnostic_closes_connection_when_interrupted(monkeypatch, tmp_path):
     import sys
     from types import ModuleType, SimpleNamespace
@@ -152,7 +174,13 @@ def test_diagnostic_reports_success_after_closing(monkeypatch, capsys):
 
 def test_guided_capture_writes_structured_events_with_operation(tmp_path, monkeypatch):
     import json
+    import sys
     from types import SimpleNamespace
+
+    class TouchPoint(SimpleNamespace):
+        pass
+
+    monkeypatch.setitem(sys.modules, "opendeck", SimpleNamespace(TouchPoint=TouchPoint))
 
     class Source:
         def __init__(self, values):
@@ -163,7 +191,7 @@ def test_guided_capture_writes_structured_events_with_operation(tmp_path, monkey
 
     product = SimpleNamespace(
         input=Source([None, "input-3", None]),
-        touch=Source([None, SimpleNamespace(x=12, y=34), None]),
+        touch=Source([None, TouchPoint(x=12, y=34), None]),
     )
     path = tmp_path / "result.jsonl"
     clock = iter([0, 0, 2])
@@ -183,8 +211,14 @@ def test_guided_capture_writes_structured_events_with_operation(tmp_path, monkey
 
 def test_pending_events_are_not_attributed_to_next_step(monkeypatch):
     import json
+    import sys
     from io import StringIO
     from types import SimpleNamespace
+
+    class TouchPoint:
+        pass
+
+    monkeypatch.setitem(sys.modules, "opendeck", SimpleNamespace(TouchPoint=TouchPoint))
 
     class Source:
         def __init__(self, values):
