@@ -164,7 +164,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sdk", type=Path, default=Path("vendor/streamdock-sdk"))
     parser.add_argument("--device-index", type=int)
-    parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--output", type=Path, default=Path("logs/diagnostics"))
     args = parser.parse_args()
     filename = datetime.now().strftime("n4pro-diagnostic-%Y%m%d-%H%M%S-%f.jsonl")
     path = args.output or Path(filename)
