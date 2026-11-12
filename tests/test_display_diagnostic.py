@@ -105,6 +105,7 @@ def test_diagnostic_closes_connection_when_interrupted(monkeypatch, tmp_path):
 
 
 def test_connection_is_closed_if_drawing_fails(monkeypatch):
+    import json
     from io import StringIO as BytesIOText
     from types import SimpleNamespace
 
@@ -121,9 +122,32 @@ def test_connection_is_closed_if_drawing_fails(monkeypatch):
         screen=BrokenView(),
     )
     monkeypatch.setattr("builtins.input", lambda _: "")
+    output = BytesIOText()
     with pytest.raises(RuntimeError, match="transfer failed"):
-        diagnostic.run(product, {}, BytesIOText())
+        diagnostic.run(product, {}, output)
     assert closed == [True]
+    error = json.loads(output.getvalue().splitlines()[-1])
+    assert error["type"] == "error"
+    assert "RuntimeError: transfer failed" in error["traceback"]
+
+
+def test_diagnostic_reports_success_after_closing(monkeypatch, capsys):
+    import json
+    from io import StringIO
+    from types import SimpleNamespace
+
+    closed = []
+    product = SimpleNamespace(
+        link=SimpleNamespace(open=lambda: None, close=lambda: closed.append(True))
+    )
+    monkeypatch.setattr("builtins.input", lambda _: "")
+    monkeypatch.setattr(diagnostic, "draw_images", lambda *_: None)
+    monkeypatch.setattr(diagnostic, "record_inputs", lambda *_: None)
+    output = StringIO()
+    diagnostic.run(product, {}, output)
+    assert closed == [True]
+    assert json.loads(output.getvalue().splitlines()[-1])["type"] == "finished"
+    assert "正常に終了" in capsys.readouterr().out
 
 
 def test_guided_capture_writes_structured_events_with_operation(tmp_path, monkeypatch):
