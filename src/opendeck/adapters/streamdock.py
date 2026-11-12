@@ -327,7 +327,10 @@ class _Link(Link):
             except (AttributeError, ValueError) as error:
                 self._fail(generation, StreamDockError(f"Invalid swipe: {error}"))
                 return
-            self._publish_touch(generation, Swipe(direction))
+            movement = (
+                Direction.LEFT if direction == Direction.RIGHT else Direction.RIGHT
+            )
+            self._publish_touch(generation, Swipe(movement))
             return
         notifications: tuple[Observer, ...] = ()
         with self._lock:
