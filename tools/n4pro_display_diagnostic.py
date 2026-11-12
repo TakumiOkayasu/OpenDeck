@@ -8,6 +8,7 @@ import platform
 import subprocess
 import sys
 import time
+import traceback
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -104,6 +105,7 @@ def capture_step(
         drain_inputs(product, output, step)
         time.sleep(0.05)
     write_record(output, "step_end", step=step)
+    print("この操作の記録を終了しました。", flush=True)
 
 
 def record_inputs(product: SurfaceProduct, output: TextIO) -> None:
@@ -143,11 +145,16 @@ def run(product: SurfaceProduct, images: dict[Slot, int], output: TextIO) -> Non
         print("\n中断しました。", flush=True)
     except Exception as error:
         write_record(
-            output, "error", error_type=type(error).__name__, message=str(error)
+            output,
+            "error",
+            error_type=type(error).__name__,
+            message=str(error),
+            traceback=traceback.format_exc(),
         )
         raise
     else:
         write_record(output, "finished")
+        print("診断が正常に終了しました。記録先のJSONLを確認してください。", flush=True)
 
 
 def main() -> None:
@@ -182,7 +189,11 @@ def main() -> None:
             product = factory.make_surface(images)
         except Exception as error:
             write_record(
-                output, "error", error_type=type(error).__name__, message=str(error)
+                output,
+                "error",
+                error_type=type(error).__name__,
+                message=str(error),
+                traceback=traceback.format_exc(),
             )
             raise
         run(product, images, output)
