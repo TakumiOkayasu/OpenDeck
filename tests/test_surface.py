@@ -57,7 +57,13 @@ def test_images_use_distinct_display_slots_and_share_the_connection():
         product.screen.draw(b"screen")
 
 
-def test_touch_points_and_swipes_are_received_without_sdk_types():
+@pytest.mark.parametrize(
+    ("sdk_direction", "movement"),
+    [("right", opendeck.Direction.LEFT), ("left", opendeck.Direction.RIGHT)],
+)
+def test_touch_points_and_swipes_are_received_without_sdk_types(
+    sdk_direction, movement
+):
     device = DisplayDevice()
     product = surface(device)
     with pytest.raises(opendeck.InputError):
@@ -70,11 +76,11 @@ def test_touch_points_and_swipes_are_received_without_sdk_types():
         device.callback(
             device,
             SimpleNamespace(
-                event_type="swipe", direction=SimpleNamespace(value="right")
+                event_type="swipe", direction=SimpleNamespace(value=sdk_direction)
             ),
         )
         assert product.touch.take() == opendeck.TouchPoint(46, 75)
-        assert product.touch.take() == opendeck.Swipe(opendeck.Direction.RIGHT)
+        assert product.touch.take() == opendeck.Swipe(movement)
         assert product.touch.take() is None
     finally:
         product.link.close()
