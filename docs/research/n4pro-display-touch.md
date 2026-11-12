@@ -34,7 +34,7 @@ SDKのサイズは画像変換の入力キャンバスであり、上記だけ�
 [固定SDK](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDockN4Pro.py#L53-L119)は、
 `ACK ARX`形式の座標をタッチ用callbackから通知する。
 別の入力callbackでは左右のスワイプを通知する。
-Wikiには座標列と右スワイプが記録されているが、左スワイプ、タッチの開始・終了や座標範囲の保証を実機で確認した証拠ではない。
+2026-11-12の実機ログでは、指を左へ動かした3回でSDKがright、右へ動かした5回でleftを通知した。SDKの方向名が何を意味するか、その設計意図は未確認である。これはタッチの開始・終了や座標範囲を保証するものではない。
 座標列から押下・解放・タップを推測して合成しない。
 
 [メーカーの利用ガイド](https://mirabox.net/fr/blogs/tutorial/how-to-set-up-the-touchscreen-function-of-n4-pro?constraint=beginner-guides)は、
