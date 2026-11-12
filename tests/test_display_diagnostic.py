@@ -13,6 +13,26 @@ diagnostic = module_from_spec(spec)
 spec.loader.exec_module(diagnostic)
 
 
+def test_diagnostic_guides_swipes_in_japanese_with_physical_directions():
+    from unittest.mock import patch
+
+    prompts = []
+    steps = []
+    with (
+        patch("builtins.input", side_effect=lambda prompt: prompts.append(prompt)),
+        patch.object(
+            diagnostic,
+            "capture_step",
+            side_effect=lambda _, __, step, ___: steps.append(step),
+        ),
+    ):
+        diagnostic.record_inputs(None, None)
+    assert any("右から左" in prompt and "←" in prompt for prompt in prompts)
+    assert any("左から右" in prompt and "→" in prompt for prompt in prompts)
+    assert all("Enter" in prompt for prompt in prompts)
+    assert "swipe_left" in steps and "swipe_right" in steps
+
+
 def test_images_distinguish_each_target_and_screen():
     images = [diagnostic.make_image(str(n), (176, 112)) for n in range(11, 15)]
     assert len(set(images)) == 4
