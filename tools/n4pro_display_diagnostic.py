@@ -29,14 +29,19 @@ def make_image(label: str, size: tuple[int, int]) -> bytes:
     image = Image.new("RGBA", size, (18, 35, 52, 255))
     draw = ImageDraw.Draw(image)
     width, height = size
+
     for x in range(0, width, max(width // 8, 1)):
         draw.line((x, 0, x, height), fill=(70, 100, 120, 255))
+
     for y in range(0, height, max(height // 4, 1)):
         draw.line((0, y, width, y), fill=(70, 100, 120, 255))
+
     draw.rectangle((0, 0, width - 1, height - 1), outline="white", width=3)
     draw.rectangle((5, 5, 16, 16), fill="red")
     draw.rectangle((width - 17, 5, width - 6, 16), fill="lime")
+
     draw.text((width // 2 - 20, height // 2 - 5), label, fill="white")
+
     output = BytesIO()
     image.save(output, format="PNG")
     return output.getvalue()
@@ -77,6 +82,7 @@ def draw_images(
     write_record(output, "image_sent", target="background")
     print("背景画像を送信しました。実機に表示されたか確認してください。", flush=True)
     input("Enterキーを押すとボタンと副画面の画像を送信します: ")
+
     for slot, number in images.items():
         size = (112, 112) if number <= 10 else (176, 112)
         product.images[slot].draw(make_image(f"D{number}", size))
@@ -85,10 +91,12 @@ def draw_images(
 
 
 def drain_inputs(product: SurfaceProduct, output: TextIO, step: str | None) -> None:
+    from opendeck import TouchPoint
+
     while (slot := product.input.take()) is not None:
         write_record(output, "button", step=step, slot=str(slot))
     while (event := product.touch.take()) is not None:
-        if hasattr(event, "x"):
+        if isinstance(event, TouchPoint):
             write_record(output, "touch", step=step, x=event.x, y=event.y)
         else:
             write_record(output, "swipe", step=step, direction=str(event.direction))
@@ -161,17 +169,21 @@ def main() -> None:
     from opendeck import Slot
     from opendeck.adapters.streamdock import StreamDockFactory
 
+    filename = datetime.now().strftime("n4pro-diagnostic-%Y%m%d-%H%M%S-%f.jsonl")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sdk", type=Path, default=Path("vendor/streamdock-sdk"))
     parser.add_argument("--device-index", type=int)
-    parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument(
+        "--output", type=Path, default=Path(f"logs/diagnostics/{filename}")
+    )
     args = parser.parse_args()
-    filename = datetime.now().strftime("n4pro-diagnostic-%Y%m%d-%H%M%S-%f.jsonl")
-    path = args.output or Path(filename)
+    path = args.output
 
     # Separate identities ensure image targets never stand in for input events.
     inputs = {n: Slot(f"input-{n}") for n in range(1, 16)}
     images = {Slot(name): n for name, n in targets().items()}
+
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("x", encoding="utf-8") as output:
         print(f"記録先: {path}", flush=True)
         write_record(

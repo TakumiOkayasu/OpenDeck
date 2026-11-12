@@ -12,7 +12,7 @@ PR #24 の公開 API を使う手動診断。表示と入力の対応は実測�
 mise exec -- uv run python tools/n4pro_display_diagnostic.py
 ```
 
-実行するたびに `n4pro-diagnostic-日時.jsonl` が作られる。既存ファイルは上書きしない。保存先を指定する場合は `--output .\result.jsonl` を付ける。`Ctrl+C` で中断でき、それまでの記録は残る。エラーが出た場合も JSONL と画面のエラーを保存する。
+実行するたびに `logs/diagnostics/n4pro-diagnostic-日時.jsonl` が作られる。保存先のディレクトリがなければ作成し、既存ファイルは上書きしない。保存先を指定する場合は `--output .\result.jsonl` を付ける。`Ctrl+C` で中断でき、それまでの記録は残る。エラーが出た場合も JSONL と画面のエラーを保存する。
 
 ## 確認手順
 
