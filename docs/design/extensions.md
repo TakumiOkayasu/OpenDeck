@@ -154,6 +154,85 @@ APIで渡す能力を絞ることは、信頼できないコードに対する�
 読込み時の任意の副作用や、拡張が外部へ残した参照を、ホストが完全に巻き戻すとは保証しない。
 信頼できる拡張の協調的な終了を前提とし、満たさない拡張を安全に隔離したとは扱わない。
 
+### Action の完了を待たずに次の入力を扱う案
+
+[#36](https://github.com/TakumiOkayasu/OpenDeck/issues/36) で検討する、上記の直列実行に代わる案。
+現行の [drain()](../../native/src/runtime.cpp) は `Binding::select()` で Action を選び、`run()` の結果を報告してから次の入力を取る。
+
+例として、ボタン A は PC のミュート状態を読み、ボタン B は別の操作を実行する。A が OS の応答を待つ間も B を操作したい。
+ホストは Action を開始し、呼び出しごとに元の Slot と完了を追跡する。完了した操作から、その Slot に結果を一度だけ報告する。
+拡張側は状態を読んでから描画するなど、順序が必要な箇所で `await` する。
+
+#### クラス図
+
+`ShowMuteState` は拡張の実装例。必要な `MuteReader` と `View` はコンストラクタで受け取る。
+Windows API のハンドルや戻り値は Windows 側の実装で解釈する。拡張が受け取るのはミュート状態か読取りエラー。
+図中の `Task<T>` は結果を待てることを表す仮の型名。
+
+```mermaid
+classDiagram
+    direction TB
+    class Binding {
+        +select(slot) Action
+    }
+    class Action {
+        <<interface>>
+        +run() Task~Result~
+    }
+    class View {
+        <<interface>>
+        +draw(image)
+    }
+    class MuteReader {
+        <<interface>>
+        +read() Task~MuteState~
+    }
+    Binding --> "0..*" Action : 割り当て
+    Action <|.. ShowMuteState
+    ShowMuteState --> MuteReader
+    ShowMuteState --> View
+    MuteReader <|.. WindowsMuteReader
+```
+
+#### シーケンス図
+
+A が待機中に B の入力があり、B が先に完了する例。
+
+```mermaid
+sequenceDiagram
+    participant H as OpenDeck ホスト
+    participant A as Action A
+    participant R as MuteReader
+    participant B as Action B
+    participant V as View
+    H->>A: Slot A の run() を開始
+    A->>R: read()
+    Note over A,R: A は read() の完了を await
+    H->>B: Slot B の run() を開始
+    B-->>H: Result
+    Note over H: Slot B の結果を報告
+    alt 読取り成功
+        R-->>A: ミュート状態
+        A->>V: draw(image)
+        A-->>H: Result
+    else 読取り失敗
+        R-->>A: 読取りエラー
+        A-->>H: 失敗
+    end
+    Note over H: Slot A の結果を報告
+```
+
+#### 検証方法
+
+fake の `MuteReader` で A の完了を保留し、B の結果だけが先に一度報告されることを確認する。
+その後 A を再開し、成功時の描画、読取り失敗時の表示維持、Slot ごとの結果を確認する。テストで待機時間は決め打ちしない。
+
+#### レビューで決めたいこと
+
+初回の対象を、待機中にホストへ制御を返す拡張までとするか。
+同じスレッドをブロックする拡張も対象にする場合は、別スレッドや別プロセスでの実行を比較する必要がある。
+同じ Action への連続入力の順序、入力キューが満杯のときの押下・解放の扱い、停止時に実行中の Action をどこまで待つかは未決定。
+
 ### 停止の順序と通知登録（提案）
 
 配送単位を、入力一件の取得から選択・実行・結果報告までとする。
