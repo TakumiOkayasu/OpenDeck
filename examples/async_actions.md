@@ -6,35 +6,26 @@ A (ボタン 1) は実行を始めてから4秒後に完了する。待機中も
 
 ## N4 Pro
 
-1. [セットアップ](../README.md#セットアップ)に従ってデバイス用の依存を入れ、リポジトリのルートで実行する。
+[セットアップ](../README.md#セットアップ)に従ってデバイス用の依存を入れ、リポジトリのルートで実行する。
+検証する場合は起動前に `git rev-parse HEAD` も記録する。
 
-   ```sh
-   mise exec -- uv run python examples/async_actions.py --live
-   ```
-
-2. 起動中は `Preparing N4 Pro. Wait for INPUT OK.` が出る。ボタンのラベルが出ても、入力の監視を開始したことを示す `INPUT OK` まで待つ。表示されたら A を1回押して離す。すぐに `#1 A accepted`、B を押さずに待つと約4秒で `#1 A done` が出る。
-3. キュー満杯も確認するには Ctrl+C で終了し、起動し直す。`INPUT OK` が出てから A を押し始める。最初の A から4秒以内に A を4回、B を1回、順に押して離す。
-
-手順3の出力は次の順になる。B の完了後、先に受け付けた A が1件ずつ完了する。
-
-```text
-#1 A accepted
-#2 A accepted
-#3 A rejected (action queue full)
-#4 A rejected (action queue full)
-#5 B accepted
-#5 B done
-#1 A done
-#2 A done
+```sh
+mise exec -- uv run python examples/async_actions.py --live --debug
 ```
 
-`#1 A done` の後に A をもう1回押して離すと、`#6 A accepted` が出る。#2 の実行が終わると #6 が始まり、約4秒後に `#6 A done` が出る。
+起動中は `Preparing N4 Pro. Wait for INPUT OK.` が出る。`INPUT OK` はラベル画像の送信後、SDK reader の稼働を確認し、ホストが入力の監視を登録してキューを一度読み取れた時点で表示される。ラベル描画中に SDK に届いたボタン入力は受け付けない。合図までボタンから手を離しておく。
 
-`Live: N4 Pro.` と出る場合は旧版が実行されている。PR #55 の最新コミットをチェックアウトして再実行する。
+`accepted` は、押下と解放がそろい、ホストが Action を受け付けた時点で出る。実機の入力が届いたかは、合図の後に押して離し、受付までのログを照合して確認する。
+
+1. **A の単独完了**。`INPUT OK` の直後に A を1回押して離す。すぐに `#1 A accepted` が出る。B に触れずに待つと約4秒で `#1 A done` が出る。
+2. **B の完了**。Ctrl+C で終了し、同じコマンドで再起動する。`INPUT OK` の後に A を1回押して離し、`#1 A accepted` を確認したらすぐに B を押して離す。`#2 B accepted` と `#2 B done` が `#1 A done` より先に出る。
+3. **満杯と回復**。Ctrl+C で終了し、`--live --debug --a-delay 15` で再起動する。この確認では A を押す時間を取るため、A の実行時間を15秒にする。`INPUT OK` の後に A を3回押して離す。`#1 A accepted`、`#2 A accepted`、`#3 A rejected (action queue full)` が出る。`#1 A done` が出たら、`#2 A done` が出る前に A をもう1回押して離す。`#4 A accepted` が `#2 A done` より先に出て、その後に `#4 A done` が出る。
+
+`--debug` を付けると、SDK の `SDK raw input` と `SDK decoded input`、変換・認識、ホストの受付・完了が時刻付きで出る。入力が抜けた場合は、実際の押下・解放とこれらの行を照合する。`Live: N4 Pro.` と出る場合は旧版が実行されている。PR #55 の最新コミットをチェックアウトして再実行する。
 
 ## リプレイ
 
-リポジトリのルートで実行する。機器を接続せずに手順3と同じ入力を1回処理し、最後の A が完了したら終了する。
+リポジトリのルートで実行する。機器を接続せずに A、A、A、A、B を処理し、最後の A が完了したら終了する。3回目と4回目の A が拒否され、B、1回目の A、2回目の A の順に完了する。
 
 ```sh
 mise exec -- uv run python examples/async_actions.py

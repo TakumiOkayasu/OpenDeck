@@ -258,3 +258,28 @@ def test_listen_does_not_signal_ready_when_first_read_fails():
         assert status == []
 
     asyncio.run(check())
+
+
+def test_delayed_input_notification_is_safe_after_listener_and_loop_close():
+    from opendeck.source import Source
+
+    async def stop_listener():
+        source = Source[Slot]()
+        source.start()
+        ready = asyncio.Event()
+        async with asyncio.TaskGroup() as tasks:
+            host = AsyncHost(tasks, pending_limit=1)
+            listener = tasks.create_task(
+                host.listen(source.input, source.subject, on_ready=ready.set)
+            )
+            await ready.wait()
+            accepted, pending = source.enqueue(A)
+            assert accepted
+            assert len(pending) == 1
+            listener.cancel()
+
+        assert source.enqueue(B) == (True, ())
+        return pending
+
+    pending = asyncio.run(asyncio.wait_for(stop_listener(), 3))
+    Source.notify(pending)

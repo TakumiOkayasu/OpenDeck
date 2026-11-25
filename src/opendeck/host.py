@@ -5,6 +5,7 @@ from collections import deque
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from itertools import count
+from threading import Lock
 from typing import Literal, Protocol
 
 from .model import Result, Slot, Status
@@ -145,14 +146,28 @@ class AsyncHost:
         *,
         on_ready: Callable[[], None] | None = None,
     ) -> None:
-        """Listen until cancelled. Signal readiness after the first read succeeds."""
+        """Listen until cancelled. The caller owns the input link.
+
+        Call on_ready after subscribing and successfully reading the logical
+        input source once, even when it is empty.
+        """
         self._check_loop()
         ready = asyncio.Event()
         loop = self._loop
 
         class Wake(Observer):
+            def __init__(self) -> None:
+                self._lock = Lock()
+                self._active = True
+
             def on_change(self) -> None:
-                loop.call_soon_threadsafe(ready.set)
+                with self._lock:
+                    if self._active:
+                        loop.call_soon_threadsafe(ready.set)
+
+            def deactivate(self) -> None:
+                with self._lock:
+                    self._active = False
 
         wake = Wake()
         try:
@@ -169,6 +184,8 @@ class AsyncHost:
                     slot = source.take()
                 await ready.wait()
         finally:
+            # A producer may already hold a snapshot of registered observers.
+            wake.deactivate()
             subject.remove(wake)
 
     def dispatch(self, slot: Slot) -> None:

@@ -35,9 +35,16 @@ _JOIN_TIMEOUT = 2.0
 _HEARTBEAT_JOIN_TIMEOUT = 10.1
 
 
+@dataclass(frozen=True, slots=True)
+class _RawPacket:
+    generation: int
+    data: bytes
+    input_active: bool
+
+
 class _ReaderContext(threading.local):
     def __init__(self) -> None:
-        self.packet: tuple[int, bytes] | None = None
+        self.packet: _RawPacket | None = None
 
 
 class StreamDockError(RuntimeError):
@@ -135,19 +142,39 @@ class StreamDockFactory(Factory, ButtonFactory):
         device, button = self._select()
         return ButtonProduct(_Link(device, button, self._keys, panel), panel.buttons)
 
-    def make_surface(self, images: Mapping[Slot, int]) -> SurfaceProduct:
+    def make_surface(
+        self,
+        images: Mapping[Slot, int],
+        *,
+        initial_images: Mapping[Slot, bytes] | None = None,
+    ) -> SurfaceProduct:
+        """Create a surface with optional button images sent before input starts."""
         if any(type(key) is not int or not 1 <= key <= 14 for key in images.values()):
             raise ValueError("N4 Pro image inputs must be integers from 1 through 14")
+        display_keys = {
+            slot: key + 10 if key <= 5 else key if key <= 10 else key - 10
+            for slot, key in images.items()
+        }
+        labels = []
+        for slot, image in (initial_images or {}).items():
+            if slot not in display_keys:
+                raise ValueError("Initial image slot must have a display key")
+            if not isinstance(image, bytes):
+                raise TypeError("Image must be encoded bytes")
+            labels.append((display_keys[slot], image))
+
         device, button = self._select()
         source = Source[Slot]()
         touch = Source[TouchPoint | Swipe]()
-        link = _Link(device, button, self._keys, Signals(source, self._chords), touch)
-        views = {
-            slot: _Display(
-                link, key + 10 if key <= 5 else key if key <= 10 else key - 10
-            )
-            for slot, key in images.items()
-        }
+        link = _Link(
+            device,
+            button,
+            self._keys,
+            Signals(source, self._chords),
+            touch,
+            initial_images=tuple(labels),
+        )
+        views = {slot: _Display(link, key) for slot, key in display_keys.items()}
         return SurfaceProduct(
             link,
             source.input,
@@ -209,12 +236,15 @@ class _Link(Link):
         keys: Mapping[int, Slot],
         receiver: Receiver,
         touch: Source[TouchPoint | Swipe] | None = None,
+        *,
+        initial_images: tuple[tuple[int, bytes], ...] = (),
     ):
         self._device = device
         self._button = button
         self._keys = keys
         self._receiver = receiver
         self._touch = touch
+        self._initial_images = initial_images
         self._lock = threading.RLock()
         self._lifecycle = threading.Lock()
         self._stop = threading.Event()
@@ -233,14 +263,17 @@ class _Link(Link):
             with self._lock:
                 if not self._active:
                     raise StreamDockError("N4 Pro is not connected")
-            data = BytesIO(image)
-            result = (
-                self._device.set_frame_background(data)
-                if key is None
-                else self._device.set_key_image(key, data)
-            )
-            if (key is None and result == -1) or (key is not None and result != 0):
-                raise StreamDockError("SDK could not draw image")
+            self._write_image(image, key)
+
+    def _write_image(self, image: bytes, key: int | None) -> None:
+        data = BytesIO(image)
+        result = (
+            self._device.set_frame_background(data)
+            if key is None
+            else self._device.set_key_image(key, data)
+        )
+        if (key is None and result == -1) or (key is not None and result != 0):
+            raise StreamDockError("SDK could not draw image")
 
     def open(self) -> None:
         notifications: tuple[Observer, ...] = ()
@@ -273,6 +306,10 @@ class _Link(Link):
                         "SDK initialization completed; firmware=%r",
                         self._device.firmware_version,
                     )
+                    for key, image in self._initial_images:
+                        self._write_image(image, key)
+                    if not self._reader_is_alive():
+                        raise StreamDockError("SDK reader is not running")
                     with self._lock:
                         self._receiver.start()
                         if self._touch is not None:
@@ -303,23 +340,29 @@ class _Link(Link):
             Source.notify(notifications)
 
     def _receive_raw(self, generation: int, data: bytes) -> None:
+        with self._lock:
+            if generation == self._generation:
+                # The SDK delivers raw and decoded callbacks on the same reader.
+                # Readiness and the original wire code both belong to this packet.
+                self._reader_context.packet = _RawPacket(generation, data, self._active)
         if _LOGGER.isEnabledFor(logging.DEBUG):
             _LOGGER.debug(
                 "SDK raw input: length=%d prefix=%s", len(data), data[:32].hex(" ")
             )
-        with self._lock:
-            if generation == self._generation:
-                # The SDK invokes raw and decoded callbacks on the same reader
-                # thread. Keep the wire code that its image-key mapping loses.
-                self._reader_context.packet = (generation, data)
 
     def _receive(self, generation: int, event: Any) -> None:
         _LOGGER.debug("SDK decoded input: %r", event)
+        packet = self._reader_context.packet
+        if packet is not None and packet.generation == generation:
+            self._reader_context.packet = None
+            if not packet.input_active:
+                _LOGGER.debug("Ignoring SDK packet received before input was enabled")
+                return
+        else:
+            packet = None
+
         event_type = getattr(event.event_type, "value", event.event_type)
         if self._touch is not None and event_type == "swipe":
-            packet = self._reader_context.packet
-            if packet is not None and packet[0] == generation:
-                self._reader_context.packet = None
             try:
                 direction = Direction(
                     getattr(event.direction, "value", event.direction)
@@ -334,9 +377,6 @@ class _Link(Link):
             return
         notifications: tuple[Observer, ...] = ()
         with self._lock:
-            packet = self._reader_context.packet
-            if packet is not None and packet[0] == generation:
-                self._reader_context.packet = None
             if not self._active or generation != self._generation:
                 _LOGGER.debug("Ignoring SDK input before readiness or after close")
                 return
@@ -344,8 +384,8 @@ class _Link(Link):
                 _LOGGER.debug("Ignoring non-button input: %s", event.event_type)
                 return
             key = event.key.value
-            if packet is not None and packet[0] == generation:
-                data = packet[1]
+            if packet is not None:
+                data = packet.data
                 if (
                     len(data) >= 11
                     and data[:3] == b"ACK"
@@ -421,6 +461,13 @@ class _Link(Link):
             if not connected:
                 self._fail(generation, StreamDockError("N4 Pro disconnected"))
                 return
+            if not self._reader_is_alive():
+                self._fail(generation, StreamDockError("SDK reader stopped"))
+                return
+
+    def _reader_is_alive(self) -> bool:
+        reader = self._device.read_thread
+        return reader is not None and reader.is_alive()
 
     def _fail(self, generation: int, error: Exception) -> None:
         with self._lock:
