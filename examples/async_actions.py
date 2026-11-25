@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import sys
 from contextlib import suppress
 from pathlib import Path
 
@@ -27,7 +28,6 @@ async def main(live: bool) -> None:
     def report(slot: Slot, result: Result | None) -> None:
         print(slot, result.status.value if result else "unassigned")
 
-    events = tuple(Edge(key, pressed) for key in (1, 1, 2) for pressed in (True, False))
     keys = {1: a, 2: b}
     if live:
         from opendeck.adapters.streamdock import StreamDockFactory
@@ -35,6 +35,7 @@ async def main(live: bool) -> None:
         sdk = Path(__file__).resolve().parents[1] / "vendor" / "streamdock-sdk"
         product = StreamDockFactory(keys, (), sdk).make()
     else:
+        events = tuple(Edge(k, down) for k in (1, 1, 2) for down in (True, False))
         product = ReplayFactory(keys, (), events).make()
     try:
         product.link.open()
@@ -43,8 +44,14 @@ async def main(live: bool) -> None:
             host.bind(ReadState(), [a])
             host.bind(Resume(), [b])
             if live:
+                print(
+                    "Live: N4 Pro input only. Release buttons 1, 1, 2. Ctrl+C to exit.",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 await host.listen(product.input, product.subject)
             else:
+                print("Replay: running A, A, B once.", file=sys.stderr, flush=True)
                 while (slot := product.input.take()) is not None:
                     host.dispatch(slot)
     finally:
