@@ -122,8 +122,21 @@ replayはSDKを読み込まず、記録した入力を同じ認識・割り当�
 mise exec -- uv run python examples/async_actions.py
 ```
 
-N4 Pro で試す場合はデバイス用の依存を準備し、末尾に `--live` を付ける。実機モードではリプレイは実行されない。起動するとボタン 1 に A、ボタン 2 に B が表示される。A を2回、B を1回、順に押して離す。各行は操作が完了した時点で出る。
-最初の B が A の待機を解除すると、その状態は終了まで続く。以降の A は次の B を待たずに完了する。最初の待機から再検証するには Ctrl+C で終了し、起動し直す。
+N4 Pro で試すには、デバイス用の依存を準備して次を実行する。
+
+```sh
+mise exec -- uv run python examples/async_actions.py --live
+```
+
+ボタン 1 に A、ボタン 2 に B が表示される。各ケースは起動直後から試し、表の順に1回ずつボタンを押して離す。
+
+| 確認する動作 | 操作 | 期待する出力 |
+| --- | --- | --- |
+| A の待機中も B が動く | A → A → B | B を押すまでは出力なし。B を押すと `B done` → `A done` → `A done` |
+| A のキューが満杯でも B が動く | A → A → A → B | 3回目の A で `A failed (action queue full)`。B を押すと `B done` → `A done` → `A done` |
+
+この例の `pending_limit=2` は Action ごとの上限で、実行中の1件も含む。上限を超えた操作は受け付けない。
+最初の B で待機が解除され、その後の A はすぐに完了する。別のケースを試すときは Ctrl+C で終了し、同じコマンドで起動し直す。
 サンプルは Python の `AsyncHost` を使う。既存の `opendeck run` と `replay` コマンドは同期の `Action` を使う。
 
 SDK・Pythonを使わず、C++基盤だけをビルドして確認できる。
