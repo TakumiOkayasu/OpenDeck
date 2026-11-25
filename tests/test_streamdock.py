@@ -47,7 +47,7 @@ class FakeN4Pro:
         self.initialized = 0
         self.closed: list[bool] = []
         self.open_result = True
-        self.init_error: Exception | None = None
+        self.init_error: BaseException | None = None
         self.close_error: Exception | None = None
         self.init_events: tuple[SimpleNamespace, ...] = ()
         self.read_thread: LiveWorker | None = None
@@ -914,45 +914,66 @@ class StreamDockTests(unittest.TestCase):
                 self.assertIsNone(product.input.take())
 
     def test_initial_image_failure_cleans_the_unready_surface(self):
-        images = []
-
         class Device(FakeN4Pro):
+            def __init__(self, write_error):
+                super().__init__()
+                self.images = []
+                self.write_error = write_error
+
             def set_touchscreen_callback(self, callback):
                 self.touch_callback = callback
 
             def set_key_image(self, key, image):
-                images.append((key, image.getvalue()))
+                self.images.append((key, image.getvalue()))
+                if self.write_error is not None:
+                    raise self.write_error
                 return -1
 
-        device = Device()
-        sdk = streamdock._Sdk(FakeManager([device]), FakeN4Pro, "button")
-        slot = Slot("primary")
-        factory = StreamDockFactory({1: slot}, (), Path("sdk-checkout"))
-        with patch.object(streamdock, "_load", return_value=sdk):
-            product = factory.make_surface({slot: 1}, initial_images={slot: b"label"})
-        self.addCleanup(product.link.close)
+        cases = (
+            (None, StreamDockError, "could not draw image"),
+            (KeyboardInterrupt("interrupted"), KeyboardInterrupt, "interrupted"),
+        )
+        for write_error, error_type, message in cases:
+            with self.subTest(error_type=error_type):
+                device = Device(write_error)
+                sdk = streamdock._Sdk(FakeManager([device]), FakeN4Pro, "button")
+                slot = Slot("primary")
+                factory = StreamDockFactory({1: slot}, (), Path("sdk-checkout"))
+                with patch.object(streamdock, "_load", return_value=sdk):
+                    product = factory.make_surface(
+                        {slot: 1}, initial_images={slot: b"label"}
+                    )
+                self.addCleanup(product.link.close)
 
-        with self.assertRaisesRegex(StreamDockError, "could not draw image"):
-            product.link.open()
+                with self.assertRaisesRegex(error_type, message):
+                    product.link.open()
 
-        self.assertEqual(images, [(11, b"label")])
-        self.assertEqual(device.closed, [False])
-        self.assertIsNone(device.raw_callback)
-        self.assertIsNone(device.callback)
-        self.assertIsNone(device.touch_callback)
-        self.assertIsNone(product.input.take())
+                self.assertEqual(device.images, [(11, b"label")])
+                self.assertEqual(device.closed, [False])
+                self.assertIsNone(device.raw_callback)
+                self.assertIsNone(device.callback)
+                self.assertIsNone(device.touch_callback)
+                self.assertIsNone(product.input.take())
 
     def test_startup_and_cleanup_failures_are_both_reported(self):
-        device = FakeN4Pro()
-        device.init_error = RuntimeError("init failed")
-        device.close_error = RuntimeError("close failed")
-        product = self.make([device])
-        with self.assertRaises(ExceptionGroup) as caught:
-            product.link.open()
-        self.assertIs(caught.exception.exceptions[0], device.init_error)
-        cleanup_error = caught.exception.exceptions[1]
-        assert isinstance(cleanup_error, ExceptionGroup)
-        self.assertIs(cleanup_error.exceptions[0], device.close_error)
+        cases = (
+            (RuntimeError("init failed"), ExceptionGroup),
+            (KeyboardInterrupt(), BaseExceptionGroup),
+        )
+        for init_error, group_type in cases:
+            with self.subTest(group_type=group_type):
+                device = FakeN4Pro()
+                device.init_error = init_error
+                device.close_error = RuntimeError("close failed")
+                product = self.make([device])
+                with self.assertRaises(BaseException) as caught:
+                    product.link.open()
+                self.assertIs(type(caught.exception), group_type)
+                assert isinstance(caught.exception, BaseExceptionGroup)
+                self.assertIs(caught.exception.exceptions[0], init_error)
+                cleanup_error = caught.exception.exceptions[1]
+                assert isinstance(cleanup_error, ExceptionGroup)
+                self.assertIs(cleanup_error.exceptions[0], device.close_error)
 
     def test_monitor_start_failure_cleans_the_opened_sdk_device(self):
         device = FakeN4Pro()

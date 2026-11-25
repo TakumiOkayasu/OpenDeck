@@ -324,13 +324,18 @@ class _Link(Link):
                         name="streamdock-presence",
                     )
                     self._monitor.start()
-                except Exception as error:
-                    notifications = self._invalidate(error)
+                except BaseException as error:
+                    failure = (
+                        error
+                        if isinstance(error, Exception)
+                        else StreamDockError("SDK startup interrupted")
+                    )
+                    notifications = self._invalidate(failure)
                     self._stop.set()
                     try:
                         self._close_device()
-                    except Exception as cleanup_error:
-                        raise ExceptionGroup(
+                    except BaseException as cleanup_error:
+                        raise BaseExceptionGroup(
                             "SDK startup and cleanup failed", [error, cleanup_error]
                         ) from None
                     self._opened = False
