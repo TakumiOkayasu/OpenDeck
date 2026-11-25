@@ -238,3 +238,23 @@ def test_immediate_action_yields_to_ready_peer_between_calls():
         assert order == [A, B, A]
 
     asyncio.run(check())
+
+
+def test_listen_does_not_signal_ready_when_first_read_fails():
+    from opendeck.ports import InputError
+    from opendeck.source import Source
+
+    async def check():
+        source = Source[Slot]()
+        source.start()
+        source.fail("disconnected")
+        status = []
+        async with asyncio.TaskGroup() as tasks:
+            host = AsyncHost(tasks, pending_limit=1)
+            with pytest.raises(InputError, match="disconnected"):
+                await host.listen(
+                    source, source, on_ready=lambda: status.append("ready")
+                )
+        assert status == []
+
+    asyncio.run(check())

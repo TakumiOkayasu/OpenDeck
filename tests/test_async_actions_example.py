@@ -12,18 +12,32 @@ SCRIPT = Path(__file__).resolve().parents[1] / "examples" / "async_actions.py"
 
 
 @asynccontextmanager
-async def live_sample(monkeypatch, main):
-    device = DisplayDevice()
+async def live_sample(monkeypatch, main, *, press_on_ready=False):
+    class Device(DisplayDevice):
+        def init(self):
+            super().init()
+            # During SDK initialization, inputs must not occupy slot #1.
+            self.emit_packet(1, 1)
+            self.emit_packet(1, 0)
+
+    device = Device()
     sdk = streamdock._Sdk(FakeManager([device]), DisplayDevice, "button")
     monkeypatch.setattr(streamdock, "_load", lambda _: sdk)
     lines: asyncio.Queue[str] = asyncio.Queue()
-    monkeypatch.setitem(
-        main.__globals__, "print", lambda line, **_: lines.put_nowait(line)
-    )
 
     def press(key):
         device.emit_packet(key, 1)
         device.emit_packet(key, 0)
+
+    def capture(line, **options):
+        lines.put_nowait(line)
+        if line == "INPUT OK":
+            assert options.get("flush") is True
+            assert [index for index, _ in device.images] == [11, 12]
+            if press_on_ready:
+                press(1)
+
+    monkeypatch.setitem(main.__globals__, "print", capture)
 
     async def expect(line):
         try:
@@ -34,7 +48,8 @@ async def live_sample(monkeypatch, main):
 
     live = asyncio.create_task(main(True))
     try:
-        assert (await asyncio.wait_for(lines.get(), 3)).startswith("Live: N4 Pro.")
+        await expect("Preparing N4 Pro. Wait for INPUT OK.")
+        await expect("INPUT OK")
         yield press, expect
     finally:
         live.cancel()
@@ -47,8 +62,7 @@ def test_a_completes_without_pressing_b(monkeypatch):
     main = runpy.run_path(str(SCRIPT))["main"]
 
     async def check():
-        async with live_sample(monkeypatch, main) as (press, expect):
-            press(1)
+        async with live_sample(monkeypatch, main, press_on_ready=True) as (_, expect):
             await expect("#1 A accepted")
             await expect("#1 A done")
 

@@ -138,8 +138,14 @@ class AsyncHost:
         self._occupied.update(parts)
         return owner
 
-    async def listen(self, source: Input[Slot], subject: Subject) -> None:
-        """Read buffered and future input until cancelled. The caller owns the link."""
+    async def listen(
+        self,
+        source: Input[Slot],
+        subject: Subject,
+        *,
+        on_ready: Callable[[], None] | None = None,
+    ) -> None:
+        """Listen until cancelled. Signal readiness after the first read succeeds."""
         self._check_loop()
         ready = asyncio.Event()
         loop = self._loop
@@ -153,9 +159,14 @@ class AsyncHost:
             subject.add(wake)
             while True:
                 ready.clear()
-                while (slot := source.take()) is not None:
+                slot = source.take()
+                if on_ready is not None:
+                    on_ready()
+                    on_ready = None
+                while slot is not None:
                     self.dispatch(slot)
                     await asyncio.sleep(0)
+                    slot = source.take()
                 await ready.wait()
         finally:
             subject.remove(wake)

@@ -51,6 +51,7 @@ async def main(live: bool) -> None:
     a, b = Slot("A"), Slot("B")
     keys = {1: a, 2: b}
     if live:
+        print("Preparing N4 Pro. Wait for INPUT OK.", file=sys.stderr, flush=True)
         from opendeck.adapters.streamdock import StreamDockFactory
 
         sdk = Path(__file__).resolve().parents[1] / "vendor" / "streamdock-sdk"
@@ -72,13 +73,11 @@ async def main(live: bool) -> None:
             host.bind(SlowAction(), [a])
             host.bind(QuickAction(), [b])
             if live:
-                print(
-                    f"Live: N4 Pro. A takes {A_DELAY_SECONDS}s, B is immediate. "
-                    "Ctrl+C to exit.",
-                    file=sys.stderr,
-                    flush=True,
+                await host.listen(
+                    product.input,
+                    product.subject,
+                    on_ready=lambda: print("INPUT OK", flush=True),
                 )
-                await host.listen(product.input, product.subject)
             else:
                 print(
                     "Replay: running A, A, A, A, B once.", file=sys.stderr, flush=True
