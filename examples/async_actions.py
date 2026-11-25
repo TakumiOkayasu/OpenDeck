@@ -26,7 +26,9 @@ async def main(live: bool) -> None:
             return Result(Status.DONE)
 
     def report(slot: Slot, result: Result | None) -> None:
-        print(slot, result.status.value if result else "unassigned")
+        status = result.status.value if result else "unassigned"
+        detail = f" ({result.detail})" if result and result.detail else ""
+        print(f"{slot} {status}{detail}")
 
     keys = {1: a, 2: b}
     if live:
