@@ -9,9 +9,9 @@ from io import BytesIO
 from pathlib import Path
 
 from opendeck.adapters.replay import Edge, ReplayFactory
-from opendeck.host import AsyncHost
+from opendeck.host import AsyncHost, DispatchEvent
 from opendeck.model import Result, Slot, Status
-from opendeck.ports import Input, SurfaceProduct
+from opendeck.ports import SurfaceProduct
 
 
 def button_label(slot: Slot, number: int) -> bytes:
@@ -44,21 +44,12 @@ class ResumeA:
         return Result(Status.DONE)
 
 
-@dataclass(frozen=True)
-class TraceInput(Input[Slot]):
-    source: Input[Slot]
-
-    def take(self) -> Slot | None:
-        slot = self.source.take()
-        if slot is not None:
-            print(f"{slot} received", flush=True)
-        return slot
-
-
-def report(slot: Slot, result: Result | None) -> None:
-    status = result.status.value if result is not None else "unassigned"
-    detail = f" ({result.detail})" if result is not None and result.detail else ""
-    print(f"{slot} {status}{detail}", flush=True)
+def print_dispatch(event: DispatchEvent) -> None:
+    phase: str = event.phase
+    if phase == "finished" and event.result is not None:
+        phase = event.result.status.value
+    detail = f" ({event.result.detail})" if event.result and event.result.detail else ""
+    print(f"#{event.sequence} {event.slot} {phase}{detail}", flush=True)
 
 
 async def main(live: bool) -> None:
@@ -80,9 +71,8 @@ async def main(live: bool) -> None:
         if isinstance(product, SurfaceProduct):
             for number, slot in keys.items():
                 product.images[slot].draw(button_label(slot, number))
-        source = TraceInput(product.input)
         async with asyncio.TaskGroup() as tasks:
-            host = AsyncHost(tasks, report, pending_limit=2)
+            host = AsyncHost(tasks, pending_limit=2, trace=print_dispatch)
             host.bind(WaitForB(released), [a])
             host.bind(ResumeA(released), [b])
             if live:
@@ -91,10 +81,10 @@ async def main(live: bool) -> None:
                     file=sys.stderr,
                     flush=True,
                 )
-                await host.listen(source, product.subject)
+                await host.listen(product.input, product.subject)
             else:
                 print("Replay: running A, A, B once.", file=sys.stderr, flush=True)
-                while (slot := source.take()) is not None:
+                while (slot := product.input.take()) is not None:
                     host.dispatch(slot)
     finally:
         product.link.close()
