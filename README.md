@@ -102,6 +102,21 @@ mise exec -- uv run opendeck run examples/buttons.json --debug
 同時押しが成立した場合、その構成入力による単独操作は実行しない。
 詳細は[実装設計](docs/implementation.md)を参照。
 
+### Windows で終了時の USB 再接続を調べる
+
+1. N4 Pro を1台接続し、通常のターミナルで `mise exec -- uv run python examples/async_actions.py --live` を起動する。
+2. 別の**管理者 PowerShell** でリポジトリのルートから次の1行目を実行する。採取開始の案内が出たら OpenDeck 側で Ctrl+C を押す。ケーブルはそのままで、消灯や接続音の有無を控える。OpenDeck を起動し直す前に、採取側で Enter を押す。
+3. OpenDeck を終了したまま2行目を実行する。今度は採取中にケーブルを抜き、同じポートに挿し直す。認識されたら Enter を押す。
+
+```powershell
+.\tools\n4pro_usb_trace.ps1
+.\tools\n4pro_usb_trace.ps1 -Scenario PhysicalReconnect
+```
+
+各回の保存先はコンソールに表示される。`before.json` の InstanceId と LocationPaths で N4 Pro を特定し、抜き差しした回の `events.csv` でハブとポート、切断・列挙の順序を確認する。
+終了時の記録で同じポートを照合し、画面の変化と Windows のイベントを [#52](https://github.com/TakumiOkayasu/OpenDeck/issues/52) に記録する。
+時刻と有効なプロバイダーは `markers.txt`、イベントの損失は `summary.txt` で確認する。対象ポートを特定できない、対照で抜き差しを検出できない、イベントに欠落がある場合は判定を保留する。必要に応じて保存された ETL を Windows Performance Analyzer で開く。
+
 ## 実機なしの確認
 
 ```sh
