@@ -3,8 +3,8 @@
 import argparse
 import asyncio
 import sys
+from asyncio import sleep
 from contextlib import suppress
-from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
@@ -12,6 +12,8 @@ from opendeck.adapters.replay import Edge, ReplayFactory
 from opendeck.host import AsyncHost, DispatchEvent
 from opendeck.model import Result, Slot, Status
 from opendeck.ports import SurfaceProduct
+
+A_DELAY_SECONDS = 4
 
 
 def button_label(slot: Slot, number: int) -> bytes:
@@ -26,21 +28,14 @@ def button_label(slot: Slot, number: int) -> bytes:
     return output.getvalue()
 
 
-@dataclass(frozen=True)
-class WaitForB:
-    released: asyncio.Event
-
+class SlowAction:
     async def run(self) -> Result:
-        await self.released.wait()
+        await sleep(A_DELAY_SECONDS)
         return Result(Status.DONE)
 
 
-@dataclass(frozen=True)
-class ResumeA:
-    released: asyncio.Event
-
+class QuickAction:
     async def run(self) -> Result:
-        self.released.set()
         return Result(Status.DONE)
 
 
@@ -54,7 +49,6 @@ def print_dispatch(event: DispatchEvent) -> None:
 
 async def main(live: bool) -> None:
     a, b = Slot("A"), Slot("B")
-    released = asyncio.Event()
     keys = {1: a, 2: b}
     if live:
         from opendeck.adapters.streamdock import StreamDockFactory
@@ -64,7 +58,9 @@ async def main(live: bool) -> None:
             {slot: number for number, slot in keys.items()}
         )
     else:
-        events = tuple(Edge(k, down) for k in (1, 1, 2) for down in (True, False))
+        events = tuple(
+            Edge(key, pressed) for key in (1, 1, 1, 1, 2) for pressed in (True, False)
+        )
         product = ReplayFactory(keys, (), events).make()
     try:
         product.link.open()
@@ -73,17 +69,20 @@ async def main(live: bool) -> None:
                 product.images[slot].draw(button_label(slot, number))
         async with asyncio.TaskGroup() as tasks:
             host = AsyncHost(tasks, pending_limit=2, trace=print_dispatch)
-            host.bind(WaitForB(released), [a])
-            host.bind(ResumeA(released), [b])
+            host.bind(SlowAction(), [a])
+            host.bind(QuickAction(), [b])
             if live:
                 print(
-                    "Live: N4 Pro. Press and release A or B. Ctrl+C to exit.",
+                    f"Live: N4 Pro. A takes {A_DELAY_SECONDS}s, B is immediate. "
+                    "Ctrl+C to exit.",
                     file=sys.stderr,
                     flush=True,
                 )
                 await host.listen(product.input, product.subject)
             else:
-                print("Replay: running A, A, B once.", file=sys.stderr, flush=True)
+                print(
+                    "Replay: running A, A, A, A, B once.", file=sys.stderr, flush=True
+                )
                 while (slot := product.input.take()) is not None:
                     host.dispatch(slot)
     finally:
