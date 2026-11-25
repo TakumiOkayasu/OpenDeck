@@ -138,6 +138,8 @@ class StreamDockFactory(Factory, ButtonFactory):
     def make_surface(self, images: Mapping[Slot, int]) -> SurfaceProduct:
         if any(type(key) is not int or not 1 <= key <= 14 for key in images.values()):
             raise ValueError("N4 Pro image inputs must be integers from 1 through 14")
+        if len(set(images.values())) != len(images):
+            raise ValueError("N4 Pro image inputs must be distinct")
         device, button = self._select()
         source = Source[Slot]()
         touch = Source[TouchPoint | Swipe]()

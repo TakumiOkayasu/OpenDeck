@@ -3,12 +3,12 @@
 import argparse
 import asyncio
 import sys
-from contextlib import suppress
+from contextlib import ExitStack, suppress
 from io import BytesIO
 from pathlib import Path
 
 from opendeck.adapters.replay import Edge, ReplayFactory
-from opendeck.host import AsyncHost
+from opendeck.host import AsyncHost, Resource
 from opendeck.model import Result, Slot, Status
 from opendeck.ports import SurfaceProduct
 
@@ -55,15 +55,26 @@ async def main(live: bool) -> None:
     else:
         events = tuple(Edge(k, down) for k in (1, 1, 2) for down in (True, False))
         product = ReplayFactory(keys, (), events).make()
-    try:
+    with ExitStack() as page:
+        page.callback(product.link.close)
         product.link.open()
-        if isinstance(product, SurfaceProduct):
-            for number, slot in keys.items():
-                product.images[slot].draw(button_label(slot, number))
+        resources = (
+            {
+                slot: Resource(frozenset({slot}), view)
+                for slot, view in product.images.items()
+            }
+            if isinstance(product, SurfaceProduct)
+            else {}
+        )
         async with asyncio.TaskGroup() as tasks:
-            host = AsyncHost(tasks, report, pending_limit=2)
-            host.bind(ReadState(), [a])
-            host.bind(Resume(), [b])
+            host = AsyncHost(tasks, report, resources, pending_limit=2)
+            for number, action in ((1, ReadState()), (2, Resume())):
+                slot = keys[number]
+                displays = [slot] if slot in resources else []
+                assignment = host.bind(action, [slot], displays)
+                page.callback(assignment.unbind)
+                if displays:
+                    assignment.view(slot).draw(button_label(slot, number))
             if live:
                 print(
                     "Live: N4 Pro. Press and release A, A, B. Ctrl+C to exit.",
@@ -75,8 +86,6 @@ async def main(live: bool) -> None:
                 print("Replay: running A, A, B once.", file=sys.stderr, flush=True)
                 while (slot := product.input.take()) is not None:
                     host.dispatch(slot)
-    finally:
-        product.link.close()
 
 
 if __name__ == "__main__":
