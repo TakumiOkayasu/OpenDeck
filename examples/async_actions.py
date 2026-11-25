@@ -1,16 +1,17 @@
-"""Replay A, A, B. B resumes the first A. The second A runs last."""
+"""Check async actions with replay or N4 Pro input. See async_actions.md."""
 
 import argparse
 import asyncio
 import sys
 from contextlib import suppress
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
 from opendeck.adapters.replay import Edge, ReplayFactory
 from opendeck.host import AsyncHost
 from opendeck.model import Result, Slot, Status
-from opendeck.ports import SurfaceProduct
+from opendeck.ports import Input, SurfaceProduct
 
 
 def button_label(slot: Slot, number: int) -> bytes:
@@ -25,25 +26,44 @@ def button_label(slot: Slot, number: int) -> bytes:
     return output.getvalue()
 
 
+@dataclass(frozen=True)
+class WaitForB:
+    released: asyncio.Event
+
+    async def run(self) -> Result:
+        await self.released.wait()
+        return Result(Status.DONE)
+
+
+@dataclass(frozen=True)
+class ResumeA:
+    released: asyncio.Event
+
+    async def run(self) -> Result:
+        self.released.set()
+        return Result(Status.DONE)
+
+
+@dataclass(frozen=True)
+class TraceInput(Input[Slot]):
+    source: Input[Slot]
+
+    def take(self) -> Slot | None:
+        slot = self.source.take()
+        if slot is not None:
+            print(f"{slot} received", flush=True)
+        return slot
+
+
+def report(slot: Slot, result: Result | None) -> None:
+    status = result.status.value if result is not None else "unassigned"
+    detail = f" ({result.detail})" if result is not None and result.detail else ""
+    print(f"{slot} {status}{detail}", flush=True)
+
+
 async def main(live: bool) -> None:
     a, b = Slot("A"), Slot("B")
-    resume = asyncio.Event()
-
-    class ReadState:
-        async def run(self) -> Result:
-            await resume.wait()
-            return Result(Status.DONE)
-
-    class Resume:
-        async def run(self) -> Result:
-            resume.set()
-            return Result(Status.DONE)
-
-    def report(slot: Slot, result: Result | None) -> None:
-        status = result.status.value if result else "unassigned"
-        detail = f" ({result.detail})" if result and result.detail else ""
-        print(f"{slot} {status}{detail}")
-
+    released = asyncio.Event()
     keys = {1: a, 2: b}
     if live:
         from opendeck.adapters.streamdock import StreamDockFactory
@@ -60,20 +80,21 @@ async def main(live: bool) -> None:
         if isinstance(product, SurfaceProduct):
             for number, slot in keys.items():
                 product.images[slot].draw(button_label(slot, number))
+        source = TraceInput(product.input)
         async with asyncio.TaskGroup() as tasks:
             host = AsyncHost(tasks, report, pending_limit=2)
-            host.bind(ReadState(), [a])
-            host.bind(Resume(), [b])
+            host.bind(WaitForB(released), [a])
+            host.bind(ResumeA(released), [b])
             if live:
                 print(
-                    "Live: N4 Pro. Press and release A, A, B. Ctrl+C to exit.",
+                    "Live: N4 Pro. Press and release A or B. Ctrl+C to exit.",
                     file=sys.stderr,
                     flush=True,
                 )
-                await host.listen(product.input, product.subject)
+                await host.listen(source, product.subject)
             else:
                 print("Replay: running A, A, B once.", file=sys.stderr, flush=True)
-                while (slot := product.input.take()) is not None:
+                while (slot := source.take()) is not None:
                     host.dispatch(slot)
     finally:
         product.link.close()

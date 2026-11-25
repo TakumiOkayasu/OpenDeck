@@ -115,43 +115,7 @@ replayはSDKを読み込まず、記録した入力を同じ認識・割り当�
 設定された操作は実際に実行するので、サンプルの起動先を自分の環境に合わせる。
 認識と境界の検証であり、本体の同時入力の取得を確認するものではない。
 
-非同期の拡張ホストは [async_actions.py](examples/async_actions.py) で試せる。
-引数なしで起動すると、サンプル入力 A、A、B を1回だけリプレイして終了する。最初の A は B を待ち、2回目の A は最初の A が終わってから動く。出力順は `B done`、`A done`、`A done`。
-
-```sh
-mise exec -- uv run python examples/async_actions.py
-```
-
-N4 Pro で試すには、デバイス用の依存を準備して次を実行する。
-
-```sh
-mise exec -- uv run python examples/async_actions.py --live
-```
-
-ボタン 1 に A、ボタン 2 に B が表示される。このサンプルでは、**同じ Action で同時に受け付けるのは2件まで** (実行中の1件を含む)。この上限は起動から終了まで変わらない。
-
-起動直後に **A → A → A → A → B** の順に1回ずつ押して離す。B の後は手を止め、出力を確認する。
-
-| 操作 | その時点で起こること |
-| --- | --- |
-| 1・2回目の A | 1件目は B を待ち、2件目は順番を待つ。まだ結果は出ない。 |
-| 3・4回目の A | A の2枠が埋まっているため、押すたびに1件ずつ拒否される。拒否した分は後から実行しない。 |
-| B を1回 | B は別の Action なので実行できる。B が完了すると、受付済みの A が順に完了して枠が空く。 |
-
-この5回の操作だけなら、期待する出力は次の5行。
-
-```text
-A failed (action queue full)
-A failed (action queue full)
-B done
-A done
-A done
-```
-
-ここで **A をもう1回**押すと、追加で `A done` が1行出る。B が一度押されると A は次の B を待たないため、以降は1件終わるたびに次の A を受け付けられる。未完了の A が再び2件たまれば、次の A は同じ上限で拒否される。
-初期状態から試すには Ctrl+C で終了して起動し直す。通常ケースは **A → A → B** で、出力は `B done` → `A done` → `A done`。
-
-サンプルは Python の `AsyncHost` を使う。既存の `opendeck run` と `replay` コマンドは同期の `Action` を使う。
+非同期 Action の実機・リプレイ手順は[サンプルの説明書](examples/async_actions.md)を参照。
 
 SDK・Pythonを使わず、C++基盤だけをビルドして確認できる。
 
