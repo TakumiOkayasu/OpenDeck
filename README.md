@@ -115,6 +115,16 @@ replayはSDKを読み込まず、記録した入力を同じ認識・割り当�
 設定された操作は実際に実行するので、サンプルの起動先を自分の環境に合わせる。
 認識と境界の検証であり、本体の同時入力の取得を確認するものではない。
 
+非同期の拡張ホストは [async_actions.py](examples/async_actions.py) で試せる。
+次のコマンドは A、A、B の順に入力する。最初の A は B を待ち、2回目の A は最初の A が終わってから動く。出力順は `B done`、`A done`、`A done`。
+
+```sh
+mise exec -- uv run python examples/async_actions.py
+```
+
+N4 Pro で試す場合はデバイス用の依存を準備し、末尾に `--live` を付ける。ボタン 1 を2回押して離し、ボタン 2 を押して離す。終了は Ctrl+C。
+サンプルは Python の `AsyncHost` を使う。既存の `opendeck run` と `replay` コマンドは同期の `Action` を使う。
+
 SDK・Pythonを使わず、C++基盤だけをビルドして確認できる。
 
 ```sh
