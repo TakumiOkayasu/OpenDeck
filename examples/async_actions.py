@@ -3,7 +3,7 @@
 import argparse
 import asyncio
 import sys
-from contextlib import suppress
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 
@@ -25,7 +25,11 @@ def button_label(slot: Slot, number: int) -> bytes:
     return output.getvalue()
 
 
-async def main(live: bool) -> None:
+def mark(message: str) -> None:
+    print(f"{datetime.now(UTC).isoformat()} {message}", file=sys.stderr, flush=True)
+
+
+async def main(live: bool, live_seconds: float | None = None) -> None:
     a, b = Slot("A"), Slot("B")
     resume = asyncio.Event()
 
@@ -60,23 +64,36 @@ async def main(live: bool) -> None:
         if isinstance(product, SurfaceProduct):
             for number, slot in keys.items():
                 product.images[slot].draw(button_label(slot, number))
-        async with asyncio.TaskGroup() as tasks:
-            host = AsyncHost(tasks, report, pending_limit=2)
-            host.bind(ReadState(), [a])
-            host.bind(Resume(), [b])
-            if live:
-                print(
-                    "Live: N4 Pro. Press and release A, A, B. Ctrl+C to exit.",
-                    file=sys.stderr,
-                    flush=True,
-                )
-                await host.listen(product.input, product.subject)
-            else:
-                print("Replay: running A, A, B once.", file=sys.stderr, flush=True)
-                while (slot := product.input.take()) is not None:
-                    host.dispatch(slot)
+        # Timeout cancels the listener and task group just as Ctrl+C cancels main.
+        deadline = asyncio.timeout(live_seconds)
+        try:
+            async with deadline, asyncio.TaskGroup() as tasks:
+                host = AsyncHost(tasks, report, pending_limit=2)
+                host.bind(ReadState(), [a])
+                host.bind(Resume(), [b])
+                if live:
+                    if live_seconds is None:
+                        print(
+                            "Live: N4 Pro. Press and release A, A, B. Ctrl+C to exit.",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                    else:
+                        mark("sample ready")
+                    await host.listen(product.input, product.subject)
+                else:
+                    print("Replay: running A, A, B once.", file=sys.stderr, flush=True)
+                    while (slot := product.input.take()) is not None:
+                        host.dispatch(slot)
+        except TimeoutError:
+            if not deadline.expired():
+                raise
     finally:
+        if live_seconds is not None:
+            mark("link close started")
         product.link.close()
+        if live_seconds is not None:
+            mark("link closed")
 
 
 if __name__ == "__main__":
@@ -84,5 +101,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--live", action="store_true", help="read an N4 Pro until Ctrl+C"
     )
-    with suppress(KeyboardInterrupt):
-        asyncio.run(main(parser.parse_args().live))
+    parser.add_argument(
+        "--live-seconds", type=int, help="stop the live sample after this many seconds"
+    )
+    args = parser.parse_args()
+    if args.live_seconds is not None and (not args.live or args.live_seconds <= 0):
+        parser.error("--live-seconds requires --live and a positive duration")
+    try:
+        asyncio.run(main(args.live, args.live_seconds))
+    except KeyboardInterrupt:
+        if args.live_seconds is not None:
+            raise
