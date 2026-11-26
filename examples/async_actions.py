@@ -3,12 +3,13 @@
 import argparse
 import asyncio
 import sys
+from contextlib import ExitStack
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 
 from opendeck.adapters.replay import Edge, ReplayFactory
-from opendeck.host import AsyncHost
+from opendeck.host import AsyncHost, Resource
 from opendeck.model import Result, Slot, Status
 from opendeck.ports import SurfaceProduct
 
@@ -59,18 +60,37 @@ async def main(live: bool, live_seconds: float | None = None) -> None:
     else:
         events = tuple(Edge(k, down) for k in (1, 1, 2) for down in (True, False))
         product = ReplayFactory(keys, (), events).make()
-    try:
+
+    def close_link() -> None:
+        if live_seconds is not None:
+            mark("link close started")
+        product.link.close()
+        if live_seconds is not None:
+            mark("link closed")
+
+    with ExitStack() as page:
+        page.callback(close_link)
         product.link.open()
-        if isinstance(product, SurfaceProduct):
-            for number, slot in keys.items():
-                product.images[slot].draw(button_label(slot, number))
+        resources = (
+            {
+                slot: Resource(frozenset({slot}), view)
+                for slot, view in product.images.items()
+            }
+            if isinstance(product, SurfaceProduct)
+            else {}
+        )
         # Timeout cancels the listener and task group just as Ctrl+C cancels main.
-        deadline = asyncio.timeout(live_seconds)
+        deadline = asyncio.timeout(None)
         try:
             async with deadline, asyncio.TaskGroup() as tasks:
-                host = AsyncHost(tasks, report, pending_limit=2)
-                host.bind(ReadState(), [a])
-                host.bind(Resume(), [b])
+                host = AsyncHost(tasks, report, resources, pending_limit=2)
+                for number, action in ((1, ReadState()), (2, Resume())):
+                    slot = keys[number]
+                    displays = [slot] if slot in resources else []
+                    assignment = host.bind(action, [slot], displays)
+                    page.callback(assignment.unbind)
+                    if displays:
+                        assignment.view(slot).draw(button_label(slot, number))
                 if live:
                     if live_seconds is None:
                         print(
@@ -80,6 +100,9 @@ async def main(live: bool, live_seconds: float | None = None) -> None:
                         )
                     else:
                         mark("sample ready")
+                        deadline.reschedule(
+                            asyncio.get_running_loop().time() + live_seconds
+                        )
                     await host.listen(product.input, product.subject)
                 else:
                     print("Replay: running A, A, B once.", file=sys.stderr, flush=True)
@@ -88,12 +111,6 @@ async def main(live: bool, live_seconds: float | None = None) -> None:
         except TimeoutError:
             if not deadline.expired():
                 raise
-    finally:
-        if live_seconds is not None:
-            mark("link close started")
-        product.link.close()
-        if live_seconds is not None:
-            mark("link closed")
 
 
 if __name__ == "__main__":
