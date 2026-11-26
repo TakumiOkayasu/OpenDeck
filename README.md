@@ -26,20 +26,22 @@ Pythonとの保証の違いと公開能力の境界は[詳細設計](docs/implem
 ## セットアップ
 
 C++23、Python 3.15、[uv](https://docs.astral.sh/uv/)と[mise](https://mise.jdx.dev/)を使用する。
-uvとmiseを先にインストールし、C++コンパイラ・CMake・Ninjaはリポジトリの固定設定から取得する。
+uvとmise（以下は `2026.11.13` で確認）を先にインストールし、C++コンパイラ・CMake・Ninjaはリポジトリの固定設定から取得する。
 言語モードとツールチェーン、対象architectureは[詳細設計](docs/implementation.md#言語とビルドツール)を参照する。
 実行と開発はWindowsネイティブ環境で行え、WSLは必要ない。
 
 ```sh
 git clone --recurse-submodules https://github.com/TakumiOkayasu/OpenDeck.git
 cd OpenDeck
-mise trust
-mise install --locked
-mise exec -- uv sync --locked --extra device
-mise exec -- uv run opendeck --help
+mise trust ./mise.toml
+mise install github:llvm/llvm-project cmake ninja
+mise exec github:llvm/llvm-project cmake ninja -- uv sync --locked --extra device
+mise exec github:llvm/llvm-project cmake ninja -- uv run --locked --extra device opendeck --help
 ```
 
-既にcloneしている場合は `git submodule update --init --recursive` を実行する。
+既にcloneしている場合は `git submodule update --init --recursive` を実行してから、`mise trust` 以降へ進む。
+`mise install` では OpenDeck が使う3ツールだけを指定する。バージョンと取得先は `mise.toml` と `mise.lock` に従う。
+ロックは `mise.toml` の `[tool_config]` でこのプロジェクトのツールにだけ適用するため、 `mise install --locked` は使わない。
 SDKは [MiraboxSpace/StreamDock-Device-SDK](https://github.com/MiraboxSpace/StreamDock-Device-SDK)
 の固定したcommitを参照する。SDKのソースとnative libraryの配置は変更しない。
 Pythonは `.python-version` に従ってuvが選択する。初回はツール、Pythonと依存パッケージのダウンロードが必要になる。
@@ -104,18 +106,32 @@ mise exec -- uv run opendeck run examples/buttons.json --debug
 
 ### Windows で終了時の USB 再接続を調べる
 
-1. N4 Pro を1台接続し、通常のターミナルで `mise exec -- uv run python examples/async_actions.py --live` を起動する。
-2. 別の**管理者 PowerShell** でリポジトリのルートから次の1行目を実行する。採取開始の案内が出たら OpenDeck 側で Ctrl+C を押す。ケーブルはそのままで、消灯や接続音の有無を控える。OpenDeck を起動し直す前に、採取側で Enter を押す。
-3. OpenDeck を終了したまま2行目を実行する。今度は採取中にケーブルを抜き、同じポートに挿し直す。認識されたら Enter を押す。
+採取には **PowerShell 7.6 以上** (`pwsh`) が必要。
+[セットアップ](#セットアップ)を済ませ、N4 Pro を1台接続し、N4 Pro を使う他のアプリを閉じる。
+ケーブルを挿したまま、リポジトリのルートで**非管理者のターミナル**から実行する。
 
 ```powershell
-.\tools\n4pro_usb_trace.ps1
-.\tools\n4pro_usb_trace.ps1 -Scenario PhysicalReconnect
+pwsh -NoProfile -File .\tools\n4pro_usb_trace.ps1 -Scenario OpenDeckExit
+```
+
+ETW の採取だけを同じ `pwsh` で管理者として起動する。採取が始まると `.venv` の実機サンプルを起動し、接続・描画後に5秒間動かす。
+Ctrl+C を送る代わりに、タイマーで入力待機と Action をキャンセルし、通常の終了処理で接続を閉じる。
+プロセス終了からさらに10秒間採取して自動で止めるため、Ctrl+C や Enter は不要。画面・接続音は必要に応じて観察する。
+
+抜き差しの対照がまだない場合は、同じポートで、OpenDeck を起動せずに**管理者のターミナル**から以下を実行する。
+案内が出てからケーブルを抜いて同じポートに挿し直し、Windows が認識したら Enter を押す。
+
+```powershell
+pwsh -NoProfile -File .\tools\n4pro_usb_trace.ps1 -Scenario PhysicalReconnect
 ```
 
 各回の保存先はコンソールに表示される。`before.json` の InstanceId と LocationPaths で N4 Pro を特定し、抜き差しした回の `events.csv` でハブとポート、切断・列挙の順序を確認する。
 終了時の記録で同じポートを照合し、画面の変化と Windows のイベントを [#52](https://github.com/TakumiOkayasu/OpenDeck/issues/52) に記録する。
-時刻と有効なプロバイダーは `markers.txt`、イベントの損失は `summary.txt` で確認する。対象ポートを特定できない、対照で抜き差しを検出できない、イベントに欠落がある場合は判定を保留する。必要に応じて保存された ETL を Windows Performance Analyzer で開く。
+採取区間、プロセスの終了コード、有効なプロバイダー、取得できた SDK リビジョンは `markers.txt` で確認する。
+サンプルの接続準備と解放前後の UTC は `opendeck-stderr.txt`、イベントの損失は `summary.txt` で確認する。
+サンプルの失敗やタイムアウトは通常終了として扱わない。生の ETL には他の USB 機器の情報も含まれるため、公開 Issue には対象ポートの抜粋だけを記録する。
+対象ポートを特定できない、対照で抜き差しを検出できない、イベントに欠落がある場合は判定を保留する。
+必要に応じて保存された ETL を Windows Performance Analyzer で開く。
 
 ## 実機なしの確認
 
@@ -137,7 +153,8 @@ replayはSDKを読み込まず、記録した入力を同じ認識・割り当�
 mise exec -- uv run python examples/async_actions.py
 ```
 
-N4 Pro で試す場合はデバイス用の依存を準備し、末尾に `--live` を付ける。実機モードではリプレイは実行されない。起動するとボタン 1 に A、ボタン 2 に B が表示される。A を2回、B を1回、順に押して離す。各行は操作が完了した時点で出る。
+N4 Pro で試す場合はデバイス用の依存を準備し、末尾に `--live` を付ける。実機モードではリプレイは実行されない。
+起動するとボタン 1 に A、ボタン 2 に B が表示される。A を2回、B を1回、順に押して離す。各行は操作が完了した時点で出る。
 最初の B が A の待機を解除すると、その状態は終了まで続く。以降の A は次の B を待たずに完了する。最初の待機から再検証するには Ctrl+C で終了し、起動し直す。
 サンプルは Python の `AsyncHost` を使う。既存の `opendeck run` と `replay` コマンドは同期の `Action` を使う。
 
