@@ -147,22 +147,31 @@ replayはSDKを読み込まず、記録した入力を同じ認識・割り当�
 認識と境界の検証であり、本体の同時入力の取得を確認するものではない。
 
 非同期の拡張ホストは [async_actions.py](examples/async_actions.py) で試せる。
-引数なしで起動すると、サンプル入力 A、A、B を1回だけリプレイして終了する。最初の A は B を待ち、2回目の A は最初の A が終わってから動く。出力順は `B done`、`A done`、`A done`。
+N4 Pro で試す場合はデバイス用の依存を準備し、末尾に `--live` を付ける。
+実機モードではリプレイは実行されない。
+起動するとボタン 1 に A、ボタン 2 に B が表示される。A を2回、B を1回、順に押して離す。各行は操作が完了した時点で出る。
+最初の B が A の待機を解除すると、その状態は終了まで続く。以降の A は次の B を待たずに完了する。最初の待機から再検証するには Ctrl+C で終了し、起動し直す。
 
 ```sh
 mise exec -- uv run python examples/async_actions.py
 ```
 
-N4 Pro で試す場合はデバイス用の依存を準備し、末尾に `--live` を付ける。実機モードではリプレイは実行されない。
-起動するとボタン 1 に A、ボタン 2 に B が表示される。A を2回、B を1回、順に押して離す。各行は操作が完了した時点で出る。
-最初の B が A の待機を解除すると、その状態は終了まで続く。以降の A は次の B を待たずに完了する。最初の待機から再検証するには Ctrl+C で終了し、起動し直す。
+引数なしで起動すると、サンプル入力 A、A、B を1回だけリプレイして終了する。
+最初の A は B を待ち、2回目の A は最初の A が終わってから動く。
+出力順:
+
+```text
+B done
+A done
+A done
+```
+
 サンプルは Python の `AsyncHost` を使う。既存の `opendeck run` と `replay` コマンドは同期の `Action` を使う。
 
 SDK・Pythonを使わず、C++基盤だけをビルドして確認できる。
 
 ```sh
-mise exec -- cmake -S . -B build/core -DOPENDECK_BUILD_PYTHON=OFF \
-    -DCMAKE_BUILD_TYPE=Release
+mise exec -- cmake -S . -B build/core -DOPENDECK_BUILD_PYTHON=OFF -DCMAKE_BUILD_TYPE=Release
 mise exec -- cmake --build build/core --config Release
 mise exec -- ctest --test-dir build/core -C Release --output-on-failure
 ```
