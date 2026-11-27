@@ -64,6 +64,9 @@ LEDの制御はSDKにあり、現行OpenDeckの表示能力には接続してい
 - C APIの成功が受付、USB転送の完了、機器ACKのどこまでを表すかは、公開ヘッダーから確定できない。
   Python SDKの入力経路は `ACK ARX` をタッチ座標として解釈し、描画やLED出力のリクエストには対応付けていない。
   [出力関数と読取り関数][transport-output]・[タッチの解析][touch-ack]
+- SDKのreaderはraw通知の後、`arr[9] == 0xFF` を書込み成功確認というコメント付きの分岐で処理する。
+  分岐の本体は `pass` で、個々の画像・LED要求との対応や機器上の反映は未確認である。
+  [readerの分岐][write-confirmation]
 - 画像・LEDの現在状態を照会する公開契約や、要求ごとの完了通知は、調査した固定SDKの公開APIでは確認できなかった。
   SDKの返り値やUSB転送の観測だけで、画面への表示やLEDの発光が完了したとは判断できない。
 
@@ -82,6 +85,7 @@ LEDの制御はSDKにあり、現行OpenDeckの表示能力には接続してい
 [python-can-write]: https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Transport/LibUSBHIDAPI.py#L521-L536
 [python-last-error]: https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Transport/LibUSBHIDAPI.py#L991-L1028
 [touch-ack]: https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDockN4Pro.py#L53-L85
+[write-confirmation]: https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDock.py#L561-L577
 
 ## タッチとスワイプ
 
