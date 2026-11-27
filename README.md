@@ -30,6 +30,8 @@ uvとmise（以下は `2026.11.13` で確認）を先にインストールし、
 言語モードとツールチェーン、対象architectureは[詳細設計](docs/implementation.md#言語とビルドツール)を参照する。
 実行と開発はWindowsネイティブ環境で行え、WSLは必要ない。
 
+<!-- markdownlint-disable MD013 -->
+
 ```sh
 git clone --recurse-submodules https://github.com/TakumiOkayasu/OpenDeck.git
 cd OpenDeck
@@ -39,9 +41,12 @@ mise exec github:llvm/llvm-project cmake ninja -- uv sync --locked --extra devic
 mise exec github:llvm/llvm-project cmake ninja -- uv run --locked --extra device opendeck --help
 ```
 
+<!-- markdownlint-enable MD013 -->
+
 既にcloneしている場合は `git submodule update --init --recursive` を実行してから、`mise trust` 以降へ進む。
 `mise install` では OpenDeck が使う3ツールだけを指定する。バージョンと取得先は `mise.toml` と `mise.lock` に従う。
-ロックは `mise.toml` の `[tool_config]` でこのプロジェクトのツールにだけ適用するため、 `mise install --locked` は使わない。
+ロックは `mise.toml` の `[tool_config]` でこのプロジェクトのツールにだけ適用するため、
+`mise install --locked` は使わない。
 SDKは [MiraboxSpace/StreamDock-Device-SDK](https://github.com/MiraboxSpace/StreamDock-Device-SDK)
 の固定したcommitを参照する。SDKのソースとnative libraryの配置は変更しない。
 Pythonは `.python-version` に従ってuvが選択する。初回はツール、Pythonと依存パッケージのダウンロードが必要になる。
@@ -114,7 +119,8 @@ mise exec -- uv run opendeck run examples/buttons.json --debug
 pwsh -NoProfile -File .\tools\n4pro_usb_trace.ps1 -Scenario OpenDeckExit
 ```
 
-ETW の採取だけを同じ `pwsh` で管理者として起動する。採取が始まると `.venv` の Python で実機サンプルを `--live --live-seconds 5` で起動する。
+ETW の採取だけを同じ `pwsh` で管理者として起動する。
+採取が始まると `.venv` の Python で実機サンプルを `--live --live-seconds 5` で起動する。
 入力準備を示す `INPUT OK` の出力後に5秒のタイマーを開始する。Ctrl+C を送る代わりに、タイマーで入力待機と Action をキャンセルし、通常の終了処理で接続を閉じる。
 サンプルの正常終了からさらに10秒間採取して自動で止めるため、Ctrl+C や Enter は不要。画面・接続音は必要に応じて観察する。
 
@@ -125,10 +131,13 @@ ETW の採取だけを同じ `pwsh` で管理者として起動する。採取�
 pwsh -NoProfile -File .\tools\n4pro_usb_trace.ps1 -Scenario PhysicalReconnect
 ```
 
-各回の保存先はコンソールに表示される。`before.json` の InstanceId と LocationPaths で N4 Pro を特定し、抜き差しした回の `events.csv` でハブとポート、切断・列挙の順序を確認する。
-終了時の記録で同じポートを照合し、画面の変化と Windows のイベントを [#52](https://github.com/TakumiOkayasu/OpenDeck/issues/52) に記録する。
+各回の保存先はコンソールに表示される。`before.json` の InstanceId と LocationPaths で N4 Pro を特定し、
+抜き差しした回の `events.csv` でハブとポート、切断・列挙の順序を確認する。
+終了時の記録で同じポートを照合し、画面の変化と Windows のイベントを
+[#52](https://github.com/TakumiOkayasu/OpenDeck/issues/52) に記録する。
 採取区間、プロセスの終了コード、有効なプロバイダー、取得できた SDK リビジョンは `markers.txt` で確認する。
-サンプルの `INPUT OK` は `opendeck-stdout.txt`、入力準備と接続解放前後の時刻（UTC）は `opendeck-stderr.txt`、イベントの損失は `summary.txt` で確認する。
+サンプルの `INPUT OK` は `opendeck-stdout.txt`、入力準備と接続解放前後の時刻（UTC）は
+`opendeck-stderr.txt`、イベントの損失は `summary.txt` で確認する。
 サンプルの失敗やタイムアウトは通常終了として扱わない。生の ETL には他の USB 機器の情報も含まれるため、公開 Issue には対象ポートの抜粋だけを記録する。
 対象ポートを特定できない、対照で抜き差しを検出できない、イベントに欠落がある場合は判定を保留する。
 必要に応じて保存された ETL を Windows Performance Analyzer で開く。

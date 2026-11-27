@@ -1,3 +1,3 @@
 #include "opendeck/contracts.hpp"
 
-int main() {}
+int main() { (void)opendeck::InputError{"C++23 probe"}; }

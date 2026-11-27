@@ -16,5 +16,4 @@ def test_view_contract_allows_a_consumer_to_draw_opaque_image_bytes():
     image = b"\x89PNG\x00\xff"
     draw(RecordingView(), image)
     assert calls == [image]
-    with pytest.raises(TypeError):
-        opendeck.View()
+    pytest.raises(TypeError, opendeck.View)

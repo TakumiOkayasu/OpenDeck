@@ -53,10 +53,13 @@ def test_default_log_directory_is_created_on_first_run(monkeypatch, tmp_path):
     from types import ModuleType, SimpleNamespace
 
     opendeck = ModuleType("opendeck")
-    opendeck.Slot = str
     adapter = ModuleType("opendeck.adapters.streamdock")
-    adapter.StreamDockFactory = lambda *args: SimpleNamespace(
-        make_surface=lambda _: object()
+    monkeypatch.setattr(opendeck, "Slot", str, raising=False)
+    monkeypatch.setattr(
+        adapter,
+        "StreamDockFactory",
+        lambda *args: SimpleNamespace(make_surface=lambda _: object()),
+        raising=False,
     )
     monkeypatch.setitem(sys.modules, "opendeck", opendeck)
     monkeypatch.setitem(
@@ -106,9 +109,9 @@ def test_diagnostic_closes_connection_when_interrupted(monkeypatch, tmp_path):
             return product
 
     opendeck = ModuleType("opendeck")
-    opendeck.Slot = str
     adapter = ModuleType("opendeck.adapters.streamdock")
-    adapter.StreamDockFactory = Factory
+    monkeypatch.setattr(opendeck, "Slot", str, raising=False)
+    monkeypatch.setattr(adapter, "StreamDockFactory", Factory, raising=False)
     monkeypatch.setitem(sys.modules, "opendeck", opendeck)
     monkeypatch.setitem(
         sys.modules, "opendeck.adapters", ModuleType("opendeck.adapters")
