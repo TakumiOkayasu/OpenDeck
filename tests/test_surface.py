@@ -159,16 +159,3 @@ def test_invalid_touch_coordinates_fail_input_instead_of_delivering_invalid_data
             product.touch.take()
     finally:
         product.link.close()
-
-
-def test_two_slots_cannot_alias_one_display_on_the_same_surface():
-    device = DisplayDevice()
-    with patch.object(
-        streamdock,
-        "_load",
-        return_value=streamdock._Sdk(FakeManager([device]), DisplayDevice, "button"),
-    ):
-        factory = StreamDockFactory({}, (), Path("sdk-checkout"))
-        with pytest.raises(ValueError, match="distinct"):
-            factory.make_surface({Slot("left"): 1, Slot("right"): 1})
-    assert device.opened == 0

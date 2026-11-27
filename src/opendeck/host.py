@@ -4,7 +4,9 @@ import asyncio
 from collections import deque
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import Protocol
+from itertools import count
+from threading import Lock
+from typing import Literal, Protocol
 
 from .model import Result, Slot, Status
 from .ports import Input, Observer, Subject, View
@@ -25,6 +27,14 @@ class Resource:
         object.__setattr__(self, "parts", frozenset(self.parts))
         if not self.parts:
             raise ValueError("resource needs at least one part")
+
+
+@dataclass(frozen=True, slots=True)
+class DispatchEvent:
+    sequence: int
+    slot: Slot
+    phase: Literal["accepted", "rejected", "finished"]
+    result: Result | None = None
 
 
 class UnboundError(RuntimeError):
@@ -89,21 +99,24 @@ class AsyncHost:
     def __init__(
         self,
         tasks: asyncio.TaskGroup,
-        report: Callable[[Slot, Result | None], None],
+        report: Callable[[Slot, Result | None], None] | None = None,
         resources: Mapping[str, Resource] | None = None,
         *,
         pending_limit: int,
+        trace: Callable[[DispatchEvent], None] | None = None,
     ) -> None:
         if pending_limit < 1:
             raise ValueError("pending_limit must be positive")
         self._loop = asyncio.get_running_loop()
         self._tasks = tasks
         self._report = report
+        self._trace = trace
+        self._sequence = count(1)
         self._limit = pending_limit
         self._resources = dict(resources or {})
         self._slots: dict[Slot, Assignment] = {}
         self._occupied: set[str] = set()
-        self._queues: dict[int, deque[tuple[Slot, Assignment]]] = {}
+        self._queues: dict[int, deque[tuple[int, Slot, Assignment]]] = {}
 
     def _check_loop(self) -> None:
         if asyncio.get_running_loop() is not self._loop:
@@ -126,49 +139,94 @@ class AsyncHost:
         self._occupied.update(parts)
         return owner
 
-    async def listen(self, source: Input[Slot], subject: Subject) -> None:
-        """Read buffered and future input until cancelled. The caller owns the link."""
+    async def listen(
+        self,
+        source: Input[Slot],
+        subject: Subject,
+        *,
+        on_ready: Callable[[], None] | None = None,
+    ) -> None:
+        """Listen until cancelled. The caller owns the input link.
+
+        Call on_ready after subscribing and successfully reading the logical
+        input source once, even when it is empty.
+        """
         self._check_loop()
         ready = asyncio.Event()
         loop = self._loop
 
         class Wake(Observer):
+            def __init__(self) -> None:
+                self._lock = Lock()
+                self._active = True
+
             def on_change(self) -> None:
-                loop.call_soon_threadsafe(ready.set)
+                with self._lock:
+                    if self._active:
+                        loop.call_soon_threadsafe(ready.set)
+
+            def deactivate(self) -> None:
+                with self._lock:
+                    self._active = False
 
         wake = Wake()
         try:
             subject.add(wake)
             while True:
                 ready.clear()
-                while (slot := source.take()) is not None:
+                slot = source.take()
+                if on_ready is not None:
+                    on_ready()
+                    on_ready = None
+                while slot is not None:
                     self.dispatch(slot)
                     await asyncio.sleep(0)
+                    slot = source.take()
                 await ready.wait()
         finally:
+            # A producer may already hold a snapshot of registered observers.
+            wake.deactivate()
             subject.remove(wake)
 
     def dispatch(self, slot: Slot) -> None:
         self._check_loop()
+        sequence = next(self._sequence)
         owner = self._slots.get(slot)
         if owner is None:
-            self._report(slot, None)
+            self._record(sequence, slot, "rejected")
             return
         key = id(owner._action)
         queue = self._queues.get(key)
+        entry = (sequence, slot, owner)
         if queue is None:
-            queue = deque([(slot, owner)])
+            queue = deque([entry])
             self._tasks.create_task(self._run(key, queue), eager_start=False)
             self._queues[key] = queue
         elif len(queue) < self._limit:
-            queue.append((slot, owner))
+            queue.append(entry)
         else:
-            self._report(slot, Result(Status.FAILED, "action queue full"))
+            self._record(
+                sequence, slot, "rejected", Result(Status.FAILED, "action queue full")
+            )
+            return
+        self._record(sequence, slot, "accepted")
 
-    async def _run(self, key: int, queue: deque[tuple[Slot, Assignment]]) -> None:
+    def _record(
+        self,
+        sequence: int,
+        slot: Slot,
+        phase: Literal["accepted", "rejected", "finished"],
+        result: Result | None = None,
+    ) -> None:
+        if self._trace is not None:
+            self._trace(DispatchEvent(sequence, slot, phase, result))
+        if self._report is not None and phase != "accepted":
+            self._report(slot, result)
+
+    async def _run(self, key: int, queue: deque[tuple[int, Slot, Assignment]]) -> None:
         try:
             while queue:
-                slot, owner = queue[0]
+                sequence, slot, owner = queue[0]
                 try:
                     owner._check_active()
                     result = await owner._action.run()
@@ -180,7 +238,7 @@ class AsyncHost:
                         raise
                     result = Result(Status.UNKNOWN, "action awaitable cancelled")
                 queue.popleft()
-                self._report(slot, result)
+                self._record(sequence, slot, "finished", result)
                 if queue:
                     await asyncio.sleep(0)
         finally:

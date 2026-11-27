@@ -47,10 +47,11 @@ class FakeN4Pro:
         self.initialized = 0
         self.closed: list[bool] = []
         self.open_result = True
-        self.init_error: Exception | None = None
+        self.init_error: BaseException | None = None
         self.close_error: Exception | None = None
         self.init_events: tuple[SimpleNamespace, ...] = ()
         self.read_thread: LiveWorker | None = None
+        self.reader_stops_on_close = True
         self.heartbeat_thread: SleepingHeartbeat | None = None
 
     def get_serial_number(self) -> str:
@@ -72,6 +73,8 @@ class FakeN4Pro:
 
     def open(self) -> bool:
         self.opened += 1
+        if self.open_result:
+            self.read_thread = LiveWorker()
         return self.open_result
 
     def init(self) -> None:
@@ -85,6 +88,8 @@ class FakeN4Pro:
 
     def close(self, notify: bool) -> None:
         self.closed.append(notify)
+        if self.read_thread is not None and self.reader_stops_on_close:
+            self.read_thread.alive = False
         if self.close_error is not None:
             raise self.close_error
 
@@ -143,8 +148,11 @@ class CallbackObserver(Observer):
 
 
 class LiveWorker:
+    def __init__(self, alive: bool = True) -> None:
+        self.alive = alive
+
     def is_alive(self) -> bool:
-        return True
+        return self.alive
 
 
 class SleepingHeartbeat:
@@ -842,6 +850,25 @@ class StreamDockTests(unittest.TestCase):
         device.emit(1, 0)
         self.assertEqual(product.input.take(), Slot("primary"))
 
+    def test_packet_received_during_init_is_ignored_when_decoded_after_open(self):
+        class Device(FakeN4Pro):
+            def init(self):
+                super().init()
+                self.emit_raw(input_packet(1, 1))
+
+        device = Device()
+        product = self.make([device])
+        product.link.open()
+        self.addCleanup(product.link.close)
+
+        device.emit(11, 1)
+        device.emit_packet(1, 0)
+        self.assertIsNone(product.input.take())
+
+        device.emit_packet(1, 1)
+        device.emit_packet(1, 0)
+        self.assertEqual(product.input.take(), Slot("primary"))
+
     def test_false_open_is_failure_and_partial_connection_is_cleaned(self):
         device = FakeN4Pro()
         device.open_result = False
@@ -862,17 +889,91 @@ class StreamDockTests(unittest.TestCase):
         self.assertEqual(device.closed, [False])
         self.assertIsNone(device.callback)
 
+    def test_missing_or_stopped_reader_prevents_startup(self):
+        class Device(FakeN4Pro):
+            def __init__(self, reader):
+                super().__init__()
+                self.reader_after_init = reader
+
+            def init(self):
+                super().init()
+                self.read_thread = self.reader_after_init
+
+        for reader in (None, LiveWorker(alive=False)):
+            with self.subTest(has_reader=reader is not None):
+                device = Device(reader)
+                product = self.make([device])
+                self.addCleanup(product.link.close)
+                with self.assertRaisesRegex(
+                    StreamDockError, "SDK reader is not running"
+                ):
+                    product.link.open()
+                self.assertEqual(device.closed, [False])
+                self.assertIsNone(device.raw_callback)
+                self.assertIsNone(device.callback)
+                self.assertIsNone(product.input.take())
+
+    def test_initial_image_failure_cleans_the_unready_surface(self):
+        class Device(FakeN4Pro):
+            def __init__(self, write_error):
+                super().__init__()
+                self.images = []
+                self.write_error = write_error
+
+            def set_touchscreen_callback(self, callback):
+                self.touch_callback = callback
+
+            def set_key_image(self, key, image):
+                self.images.append((key, image.getvalue()))
+                if self.write_error is not None:
+                    raise self.write_error
+                return -1
+
+        cases = (
+            (None, StreamDockError, "could not draw image"),
+            (KeyboardInterrupt("interrupted"), KeyboardInterrupt, "interrupted"),
+        )
+        for write_error, error_type, message in cases:
+            with self.subTest(error_type=error_type):
+                device = Device(write_error)
+                sdk = streamdock._Sdk(FakeManager([device]), FakeN4Pro, "button")
+                slot = Slot("primary")
+                factory = StreamDockFactory({1: slot}, (), Path("sdk-checkout"))
+                with patch.object(streamdock, "_load", return_value=sdk):
+                    product = factory.make_surface(
+                        {slot: 1}, initial_images={slot: b"label"}
+                    )
+                self.addCleanup(product.link.close)
+
+                with self.assertRaisesRegex(error_type, message):
+                    product.link.open()
+
+                self.assertEqual(device.images, [(11, b"label")])
+                self.assertEqual(device.closed, [False])
+                self.assertIsNone(device.raw_callback)
+                self.assertIsNone(device.callback)
+                self.assertIsNone(device.touch_callback)
+                self.assertIsNone(product.input.take())
+
     def test_startup_and_cleanup_failures_are_both_reported(self):
-        device = FakeN4Pro()
-        device.init_error = RuntimeError("init failed")
-        device.close_error = RuntimeError("close failed")
-        product = self.make([device])
-        with self.assertRaises(ExceptionGroup) as caught:
-            product.link.open()
-        self.assertIs(caught.exception.exceptions[0], device.init_error)
-        cleanup_error = caught.exception.exceptions[1]
-        assert isinstance(cleanup_error, ExceptionGroup)
-        self.assertIs(cleanup_error.exceptions[0], device.close_error)
+        cases = (
+            (RuntimeError("init failed"), ExceptionGroup),
+            (KeyboardInterrupt(), BaseExceptionGroup),
+        )
+        for init_error, group_type in cases:
+            with self.subTest(group_type=group_type):
+                device = FakeN4Pro()
+                device.init_error = init_error
+                device.close_error = RuntimeError("close failed")
+                product = self.make([device])
+                with self.assertRaises(BaseException) as caught:
+                    product.link.open()
+                self.assertIs(type(caught.exception), group_type)
+                assert isinstance(caught.exception, BaseExceptionGroup)
+                self.assertIs(caught.exception.exceptions[0], init_error)
+                cleanup_error = caught.exception.exceptions[1]
+                assert isinstance(cleanup_error, ExceptionGroup)
+                self.assertIs(cleanup_error.exceptions[0], device.close_error)
 
     def test_monitor_start_failure_cleans_the_opened_sdk_device(self):
         device = FakeN4Pro()
@@ -903,6 +1004,27 @@ class StreamDockTests(unittest.TestCase):
             device.transport.present = False
             self.assertTrue(wake.event.wait(1.0))
             with self.assertRaisesRegex(InputError, "disconnected"):
+                product.input.take()
+
+    def test_stopped_reader_reports_input_failure_while_device_is_present(self):
+        device = FakeN4Pro()
+        product = self.make([device])
+        wake = Wake()
+        product.subject.add(wake)
+        with patch.object(streamdock, "_POLL_INTERVAL", 0.01):
+            product.link.open()
+            self.addCleanup(product.link.close)
+            reader = device.read_thread
+            assert reader is not None
+            device.emit_packet(1, 1)
+            device.emit_packet(1, 0)
+            wake.event.clear()
+
+            reader.alive = False
+
+            self.assertTrue(wake.event.wait(1.0))
+            self.assertTrue(device.transport.present)
+            with self.assertRaisesRegex(InputError, "SDK reader stopped"):
                 product.input.take()
 
     def test_none_read_does_not_mean_disconnect_and_monitor_stops_on_close(self):
@@ -969,7 +1091,7 @@ class StreamDockTests(unittest.TestCase):
         device = FakeN4Pro()
         product = self.make([device])
         product.link.open()
-        device.read_thread = LiveWorker()
+        device.reader_stops_on_close = False
         with self.assertRaises(ExceptionGroup) as caught:
             product.link.close()
         cleanup_error = caught.exception.exceptions[0]

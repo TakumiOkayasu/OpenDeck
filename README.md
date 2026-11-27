@@ -114,9 +114,9 @@ mise exec -- uv run opendeck run examples/buttons.json --debug
 pwsh -NoProfile -File .\tools\n4pro_usb_trace.ps1 -Scenario OpenDeckExit
 ```
 
-ETW の採取だけを同じ `pwsh` で管理者として起動する。採取が始まると `.venv` の実機サンプルを起動し、接続・描画後に5秒間動かす。
-Ctrl+C を送る代わりに、タイマーで入力待機と Action をキャンセルし、通常の終了処理で接続を閉じる。
-プロセス終了からさらに10秒間採取して自動で止めるため、Ctrl+C や Enter は不要。画面・接続音は必要に応じて観察する。
+ETW の採取だけを同じ `pwsh` で管理者として起動する。採取が始まると `.venv` の Python で実機サンプルを `--live --live-seconds 5` で起動する。
+入力準備を示す `INPUT OK` の出力後に5秒のタイマーを開始する。Ctrl+C を送る代わりに、タイマーで入力待機と Action をキャンセルし、通常の終了処理で接続を閉じる。
+サンプルの正常終了からさらに10秒間採取して自動で止めるため、Ctrl+C や Enter は不要。画面・接続音は必要に応じて観察する。
 
 抜き差しの対照がまだない場合は、同じポートで、OpenDeck を起動せずに**管理者のターミナル**から以下を実行する。
 案内が出てからケーブルを抜いて同じポートに挿し直し、Windows が認識したら Enter を押す。
@@ -128,10 +128,11 @@ pwsh -NoProfile -File .\tools\n4pro_usb_trace.ps1 -Scenario PhysicalReconnect
 各回の保存先はコンソールに表示される。`before.json` の InstanceId と LocationPaths で N4 Pro を特定し、抜き差しした回の `events.csv` でハブとポート、切断・列挙の順序を確認する。
 終了時の記録で同じポートを照合し、画面の変化と Windows のイベントを [#52](https://github.com/TakumiOkayasu/OpenDeck/issues/52) に記録する。
 採取区間、プロセスの終了コード、有効なプロバイダー、取得できた SDK リビジョンは `markers.txt` で確認する。
-サンプルの接続準備と解放前後の UTC は `opendeck-stderr.txt`、イベントの損失は `summary.txt` で確認する。
+サンプルの `INPUT OK` は `opendeck-stdout.txt`、入力準備と接続解放前後の時刻（UTC）は `opendeck-stderr.txt`、イベントの損失は `summary.txt` で確認する。
 サンプルの失敗やタイムアウトは通常終了として扱わない。生の ETL には他の USB 機器の情報も含まれるため、公開 Issue には対象ポートの抜粋だけを記録する。
 対象ポートを特定できない、対照で抜き差しを検出できない、イベントに欠落がある場合は判定を保留する。
 必要に応じて保存された ETL を Windows Performance Analyzer で開く。
+fake を使ったテストや過去の実機記録は、現行の構成で入力準備から通常終了・USB 採取までを通した実機確認とは区別する。
 
 ## 実機なしの確認
 
@@ -146,27 +147,8 @@ replayはSDKを読み込まず、記録した入力を同じ認識・割り当�
 設定された操作は実際に実行するので、サンプルの起動先を自分の環境に合わせる。
 認識と境界の検証であり、本体の同時入力の取得を確認するものではない。
 
-非同期の拡張ホストは [async_actions.py](examples/async_actions.py) で試せる。
-N4 Pro で試す場合はデバイス用の依存を準備し、末尾に `--live` を付ける。
-実機モードではリプレイは実行されない。
-起動するとボタン 1 に A、ボタン 2 に B が表示される。A を2回、B を1回、順に押して離す。各行は操作が完了した時点で出る。
-最初の B が A の待機を解除すると、その状態は終了まで続く。以降の A は次の B を待たずに完了する。最初の待機から再検証するには Ctrl+C で終了し、起動し直す。
-
-```sh
-mise exec -- uv run python examples/async_actions.py
-```
-
-引数なしで起動すると、サンプル入力 A、A、B を1回だけリプレイして終了する。
-最初の A は B を待ち、2回目の A は最初の A が終わってから動く。
-出力順:
-
-```text
-B done
-A done
-A done
-```
-
-サンプルは Python の `AsyncHost` を使う。既存の `opendeck run` と `replay` コマンドは同期の `Action` を使う。
+非同期の拡張ホスト `AsyncHost` の実機・リプレイ手順は[サンプルの説明書](examples/async_actions.md)を参照。
+既存の `opendeck run` と `replay` コマンドは同期の `Action` を使う。
 
 SDK・Pythonを使わず、C++基盤だけをビルドして確認できる。
 

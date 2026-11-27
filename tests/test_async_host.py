@@ -241,6 +241,51 @@ def test_immediate_action_yields_to_ready_peer_between_calls():
     asyncio.run(check())
 
 
+def test_listen_does_not_signal_ready_when_first_read_fails():
+    from opendeck.ports import InputError
+    from opendeck.source import Source
+
+    async def check():
+        source = Source[Slot]()
+        source.start()
+        source.fail("disconnected")
+        status = []
+        async with asyncio.TaskGroup() as tasks:
+            host = AsyncHost(tasks, pending_limit=1)
+            with pytest.raises(InputError, match="disconnected"):
+                await host.listen(
+                    source, source, on_ready=lambda: status.append("ready")
+                )
+        assert status == []
+
+    asyncio.run(check())
+
+
+def test_delayed_input_notification_is_safe_after_listener_and_loop_close():
+    from opendeck.source import Source
+
+    async def stop_listener():
+        source = Source[Slot]()
+        source.start()
+        ready = asyncio.Event()
+        async with asyncio.TaskGroup() as tasks:
+            host = AsyncHost(tasks, pending_limit=1)
+            listener = tasks.create_task(
+                host.listen(source.input, source.subject, on_ready=ready.set)
+            )
+            await ready.wait()
+            accepted, pending = source.enqueue(A)
+            assert accepted
+            assert len(pending) == 1
+            listener.cancel()
+
+        assert source.enqueue(B) == (True, ())
+        return pending
+
+    pending = asyncio.run(asyncio.wait_for(stop_listener(), 3))
+    Source.notify(pending)
+
+
 def test_switching_pages_revokes_both_old_views_without_crossing_displays():
     """A page owns both views. Switching pages releases both before rebinding."""
 
