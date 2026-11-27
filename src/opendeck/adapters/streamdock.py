@@ -6,6 +6,7 @@ import sys
 import threading
 import warnings
 from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -147,10 +148,18 @@ class StreamDockFactory(Factory, ButtonFactory):
         images: Mapping[Slot, int],
         *,
         initial_images: Mapping[Slot, bytes] | None = None,
+        prepare_display: Callable[[], AbstractContextManager[None]] | None = None,
     ) -> SurfaceProduct:
-        """Create a surface with optional button images sent before input starts."""
+        """Create a surface with optional drawing before input starts.
+
+        Enter prepare_display on the opening thread after SDK initialization.
+        It may draw on the surface views, but must not open or close the link.
+        If input startup fails, exit the context before closing the SDK device.
+        """
         if any(type(key) is not int or not 1 <= key <= 14 for key in images.values()):
             raise ValueError("N4 Pro image inputs must be integers from 1 through 14")
+        if len(set(images.values())) != len(images):
+            raise ValueError("N4 Pro image inputs must be distinct")
         display_keys = {
             slot: key + 10 if key <= 5 else key if key <= 10 else key - 10
             for slot, key in images.items()
@@ -173,6 +182,7 @@ class StreamDockFactory(Factory, ButtonFactory):
             Signals(source, self._chords),
             touch,
             initial_images=tuple(labels),
+            prepare_display=prepare_display,
         )
         views = {slot: _Display(link, key) for slot, key in display_keys.items()}
         return SurfaceProduct(
@@ -238,6 +248,7 @@ class _Link(Link):
         touch: Source[TouchPoint | Swipe] | None = None,
         *,
         initial_images: tuple[tuple[int, bytes], ...] = (),
+        prepare_display: Callable[[], AbstractContextManager[None]] | None = None,
     ):
         self._device = device
         self._button = button
@@ -245,8 +256,11 @@ class _Link(Link):
         self._receiver = receiver
         self._touch = touch
         self._initial_images = initial_images
+        self._prepare_display = prepare_display
+        self._preparing_display = False
         self._lock = threading.RLock()
-        self._lifecycle = threading.Lock()
+        # Display preparation can call draw() on the opening thread.
+        self._lifecycle = threading.RLock()
         self._stop = threading.Event()
         self._monitor: threading.Thread | None = None
         self._active = False
@@ -261,7 +275,7 @@ class _Link(Link):
             raise TypeError("Image must be encoded bytes")
         with self._lifecycle:
             with self._lock:
-                if not self._active:
+                if not self._active and not self._preparing_display:
                     raise StreamDockError("N4 Pro is not connected")
             self._write_image(image, key)
 
@@ -279,8 +293,8 @@ class _Link(Link):
         notifications: tuple[Observer, ...] = ()
         try:
             with self._lifecycle:
-                if self._opened:
-                    raise StreamDockError("Connection is already open")
+                if self._opened or self._preparing_display:
+                    raise StreamDockError("Connection is already open or opening")
                 with self._lock:
                     self._generation += 1
                     generation = self._generation
@@ -308,22 +322,28 @@ class _Link(Link):
                     )
                     for key, image in self._initial_images:
                         self._write_image(image, key)
-                    if not self._reader_is_alive():
-                        raise StreamDockError("SDK reader is not running")
-                    with self._lock:
-                        self._receiver.start()
-                        if self._touch is not None:
-                            self._touch.start()
-                        self._active = True
-                        self._opened = True
-                    self._stop.clear()
-                    self._monitor = threading.Thread(
-                        target=self._watch,
-                        args=(generation,),
-                        daemon=True,
-                        name="streamdock-presence",
-                    )
-                    self._monitor.start()
+                    prepare = self._prepare_display
+                    self._preparing_display = prepare is not None
+                    try:
+                        with prepare() if prepare is not None else nullcontext():
+                            if not self._reader_is_alive():
+                                raise StreamDockError("SDK reader is not running")
+                            with self._lock:
+                                self._receiver.start()
+                                if self._touch is not None:
+                                    self._touch.start()
+                                self._active = True
+                                self._opened = True
+                            self._stop.clear()
+                            self._monitor = threading.Thread(
+                                target=self._watch,
+                                args=(generation,),
+                                daemon=True,
+                                name="streamdock-presence",
+                            )
+                            self._monitor.start()
+                    finally:
+                        self._preparing_display = False
                 except BaseException as error:
                     failure = (
                         error
@@ -503,6 +523,8 @@ class _Link(Link):
                     "Close the connection from its owner, not the SDK callback thread"
                 )
             with self._lifecycle:
+                if self._preparing_display:
+                    raise StreamDockError("Cannot close during display preparation")
                 notifications = self._invalidate()
                 self._stop.set()
                 errors: list[Exception] = []

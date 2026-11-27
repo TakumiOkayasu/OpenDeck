@@ -1,8 +1,9 @@
 import asyncio
+from contextlib import ExitStack
 
 import pytest
 
-from opendeck.host import AsyncHost, Resource
+from opendeck.host import AsyncHost, Resource, UnboundError
 from opendeck.model import Result, Slot, Status
 from opendeck.ports import View
 
@@ -283,3 +284,47 @@ def test_delayed_input_notification_is_safe_after_listener_and_loop_close():
 
     pending = asyncio.run(asyncio.wait_for(stop_listener(), 3))
     Source.notify(pending)
+
+
+def test_switching_pages_revokes_both_old_views_without_crossing_displays():
+    """A page owns both views. Switching pages releases both before rebinding."""
+
+    async def check():
+        class Display(View):
+            def __init__(self):
+                self.images = []
+
+            def draw(self, image):
+                self.images.append(image)
+
+        left, right = Display(), Display()
+        resources = {
+            "left": Resource(frozenset({"left"}), left),
+            "right": Resource(frozenset({"right"}), right),
+        }
+
+        async def run():
+            return DONE
+
+        action = Callback(run)
+        async with asyncio.TaskGroup() as tasks:
+            host = AsyncHost(tasks, lambda *_: None, resources, pending_limit=1)
+            with ExitStack() as page:
+                a = host.bind(action, [A], ["left"])
+                page.callback(a.unbind)
+                b = host.bind(action, [B], ["right"])
+                page.callback(b.unbind)
+                left_view, right_view = a.view("left"), b.view("right")
+                left_view.draw(b"A")
+                right_view.draw(b"B")
+
+            next_page = host.bind(action, [A, B], resources)
+            next_page.view("left").draw(b"C")
+            for stale in (left_view, right_view):
+                with pytest.raises(UnboundError):
+                    stale.draw(b"stale")
+            next_page.unbind()
+        assert left.images == [b"A", b"C"]
+        assert right.images == [b"B"]
+
+    asyncio.run(check())
