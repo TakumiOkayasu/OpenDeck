@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, TextIO
 from PIL import Image, ImageDraw
 
 if TYPE_CHECKING:
-    from opendeck import Slot
+    from opendeck import Slot, View
     from opendeck.ports import SurfaceProduct
 
 
@@ -75,18 +75,41 @@ def revision(path: Path) -> str | None:
         return None
 
 
+def draw_image(
+    view: View, output: TextIO, target: str, label: str, size: tuple[int, int]
+) -> None:
+    image = make_image(label, size)
+    started = time.perf_counter_ns()
+    try:
+        view.draw(image)
+    except Exception:
+        write_record(
+            output,
+            "image_failed",
+            target=target,
+            label=label,
+            elapsed_ms=(time.perf_counter_ns() - started) / 1_000_000,
+        )
+        raise
+    write_record(
+        output,
+        "image_sent",
+        target=target,
+        label=label,
+        elapsed_ms=(time.perf_counter_ns() - started) / 1_000_000,
+    )
+
+
 def draw_images(
     product: SurfaceProduct, images: dict[Slot, int], output: TextIO
 ) -> None:
-    product.screen.draw(make_image("BG", (800, 480)))
-    write_record(output, "image_sent", target="background")
+    draw_image(product.screen, output, "background", "BG", (800, 480))
     print("背景画像を送信しました。実機に表示されたか確認してください。", flush=True)
     input("Enterキーを押すとボタンと副画面の画像を送信します: ")
 
     for slot, number in images.items():
         size = (112, 112) if number <= 10 else (176, 112)
-        product.images[slot].draw(make_image(f"D{number}", size))
-        write_record(output, "image_sent", target=str(slot), label=f"D{number}")
+        draw_image(product.images[slot], output, str(slot), f"D{number}", size)
         print(f"表示先 {number} に画像 D{number} を送信しました", flush=True)
 
 
