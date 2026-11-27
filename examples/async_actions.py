@@ -116,7 +116,7 @@ async def main(
 
     with ExitStack() as page:
         page.callback(close_link)
-        resources = (
+        resources: dict[str, Resource] = (
             {
                 slot: Resource(frozenset({slot}), view)
                 for slot, view in product.images.items()

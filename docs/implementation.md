@@ -25,10 +25,8 @@ N4 Proの画像描画とタッチ入力は[表示とタッチ入力](design/disp
 
 ### 言語の選択と規格の状態
 
-今回採用する言語規格は、発行済みのC++23とする。
-LLVM Clangの `-std=c++23` を使い、策定中のdraft modeには依存しない。
-規格の対応状況は[ISO C++](https://isocpp.org/std/status)と
-[Clang](https://clang.llvm.org/cxx_status.html)を参照する。
+今回採用する言語規格は、リリース済みのC++23とする。LLVM Clangの `-std=c++23` を使う。
+規格の対応状況は[ISO C++](https://isocpp.org/std/status)と[Clang](https://clang.llvm.org/cxx_status.html)を参照する。
 言語モードの選択は、規格の全機能への準拠保証を表さない。
 
 CMakeの `cxx_std_23` を `opendeck_dialect` のINTERFACE compile featureで共有する。
@@ -55,8 +53,14 @@ pybind11は開発用依存にも固定し、build isolationの一時ディレク
 
 ### 固定ツールチェーンと対象環境
 
-[mise.toml](../mise.toml)と[mise.lock](../mise.lock)で、
-LLVM Clang 23.1.3、CMake 4.4.5、Ninja 1.13.2を固定する。CMakeの最低バージョンは4.3とする。
+[mise.toml](../mise.toml)と[mise.lock](../mise.lock)で、以下を設定する。
+
+| ツール | バージョン |
+| --- | --- |
+| CMake | 4.4.5( min: 4.3 ) |
+| LLVM Clang | 23.1.3 |
+| Ninja | 1.13.2 |
+
 `mise exec --` を通して `CXX=clang++` と `CMAKE_GENERATOR=Ninja` を適用する。
 Pythonは[.python-version](../.python-version)の3.15をuvで選択する。
 [pyproject.toml](../pyproject.toml)の下限は `requires-python = ">=3.15"` とし、
@@ -68,8 +72,7 @@ bindingはpybind11 3.1.0、build backendはscikit-build-core 1.1.1に固定す�
 
 lockの対象はWindows x64・Linux x64・macOS ARM64である。
 macOSの `aarch64` と `arm64` は同じ64bit ARM architectureを指し、Intel Macのx86_64とは異なる。
-選択した[LLVM 23.1.3の配布物][llvm-release]には
-macOS ARM64のarchiveがあり、Intel Mac向けarchiveはない。
+選択した[LLVM 23.1.3の配布物][llvm-release]には macOS ARM64 のarchiveがあり、Intel Mac向けarchiveはない。
 CIの `macos-latest` も[GitHubのrunner仕様][github-runners]ではARM64である。
 Intel Macで別途用意したLLVM Clang 23以上を使う経路は未検証であり、lock付きセットアップの対象には含めない。
 ツールの取得対象であることと、その環境でビルド・実行して確認済みであることは区別する。
@@ -188,7 +191,8 @@ Changeはpressedとatを持つ不変値とする。atはホストが適合済み
 
 ## 今回の設定形式
 
-設定ファイルにはJSONを使う。ファイルの読み込みとJSONの解析は組み立て側で行い、読み込み済みの値を[config.py](../src/opendeck/config.py)のparseへ渡す。parseは操作種別から生成処理への対応表を受け、操作を実行・照会せずに設定を検証し、関連オブジェクトを構成する。未知の項目や参照先を勝手に補完しない。
+設定ファイルにはJSONを使う。ファイルの読み込みとJSONの解析は組み立て側で行い、読み込み済みの値を[config.py](../src/opendeck/config.py)のparseへ渡す。
+parseは操作種別から生成処理への対応表を受け、操作を実行・照会せずに設定を検証し、関連オブジェクトを構成する。未知の項目や参照先を勝手に補完しない。
 
 | 項目 | 今回の表現 |
 | --- | --- |
@@ -203,7 +207,8 @@ actionsのkind以外の項目は、選んだ操作の生成処理が検証する
 
 これら5項目は必須で、利用しないchordsは空の一覧にする。上位のinputs・chords・bindingsと、下位のdevice.keysを同じJSONファイルに保存しても、構成後の責務と参照範囲は分ける。起動後の設定変更と保存画面は実装しない。
 
-実機用の操作例は[buttons.json](../examples/buttons.json)、再生用イベントは[button-events.json](../examples/button-events.json)に置く。再生イベントはkeyとpressedを持つ一覧で、記載順に処理する。時刻や待機時間は扱わない。replayでも設定した操作を実行するので、起動先を利用環境に合わせる。セットアップとCLIの実行手順は[README](../README.md)を参照する。
+実機用の操作例は[buttons.json](../examples/buttons.json)、再生用イベントは[button-events.json](../examples/button-events.json)に置く。
+再生イベントはkeyとpressedを持つ一覧で、記載順に処理する。時刻や待機時間は扱わない。replayでも設定した操作を実行するので、起動先を利用環境に合わせる。セットアップとCLIの実行手順は[README](../README.md)を参照する。
 
 入力実現側では、共通の純粋関数validate_adaptationで適合設定を検証する。
 各物理入力を異なる基底Slotへ対応付け、同時押しの全メンバーが直接適合した基底Slotであることを要求する。
@@ -237,15 +242,11 @@ Mapping内のリストなどまで不変にはしないため、生成処理は�
 
 ## キーコンフィグと操作
 
-キーコンフィグはSlotから構成済みActionへの不変の対応関係とする。物理ボタンからSlotへの対応は入力アダプタ側の適合設定であり、キーコンフィグにはSDKの識別子や押下・解放を入れない。
-
-SlotとキーコンフィグからActionを選ぶ処理は純粋関数にする。Actionの参照を返すだけで、その状態を照会せず、runも呼ばない。未割り当ての入力と、実行したActionの成否は別々に記録する。
-
-実行側は選ばれたActionにrunを一回依頼する。入力元、Slot、物理ボタンの状態を渡さない。固定したActionは複数回呼び出せるが、結果は各実行に属する。失敗または結果不明でも自動再実行しない。
-
-アプリ起動のActionは抽象的なStart能力を利用し、具体的なProcesses実装がsubprocess.Popenに引数列を渡す。shell=Falseとし、シェルのコマンド文字列へ組み直さない。今回の完了はプロセスを生成できたことを表し、起動後のアプリの準備完了や終了成功は意味しない。
-
-起動先のstdin、stdout、stderrはすべてDEVNULLへ接続する。CLIの入出力を継承させず、長時間動く起動先のstdioがCLIの出力取得完了を遅らせないようにする。起動先の標準入出力の利用・ログ保存は今回対応しない。GUIの表示先を変更する処理ではない。
+- キーコンフィグはSlotから構成済みActionへの不変の対応関係とする。物理ボタンからSlotへの対応は入力アダプタ側の適合設定であり、キーコンフィグにはSDKの識別子や押下・解放を入れない。
+- SlotとキーコンフィグからActionを選ぶ処理は純粋関数にする。Actionの参照を返すだけで、その状態を照会せず、runも呼ばない。未割り当ての入力と、実行したActionの成否は別々に記録する。
+- 実行側は選ばれたActionにrunを一回依頼する。入力元、Slot、物理ボタンの状態を渡さない。固定したActionは複数回呼び出せるが、結果は各実行に属する。失敗または結果不明でも自動再実行しない。
+- アプリ起動のActionは抽象的なStart能力を利用し、具体的なProcesses実装がsubprocess.Popenに引数列を渡す。shell=Falseとし、シェルのコマンド文字列へ組み直さない。今回の完了はプロセスを生成できたことを表し、起動後のアプリの準備完了や終了成功は意味しない。
+- 起動先のstdin、stdout、stderrはすべてDEVNULLへ接続する。CLIの入出力を継承させず、長時間動く起動先のstdioがCLIの出力取得完了を遅らせないようにする。起動先の標準入出力の利用・ログ保存は今回対応しない。GUIの表示先を変更する処理ではない。
 
 ## 入力認識の暫定規則
 
@@ -259,11 +260,13 @@ SlotとキーコンフィグからActionを選ぶ処理は純粋関数にする�
 - 同時押しが成立せず、解放した入力が使用済みでなければ、その単独Slotを成立させる。
 - 切断や終了時は、保持・使用済みの認識状態を破棄する。
 
-認識の状態遷移は、前の不変状態、取得済みのイベント、入力定義から、次の状態と成立Slotを返す純粋関数にする。SDKからの取得、現在の認識状態の保持、成立したSlotの配送はアダプタ側の副作用として扱う。純粋な関数でも、物理入力の知識を持つ計算はアダプタ内に置く。
+認識の状態遷移は、前の不変状態、取得済みのイベント、入力定義から、次の状態と成立Slotを返す純粋関数にする。
+SDKからの取得、現在の認識状態の保持、成立したSlotの配送はアダプタ側の副作用として扱う。純粋な関数でも、物理入力の知識を持つ計算はアダプタ内に置く。
 
 ## 未処理入力と通知
 
-SourceはFIFOの未処理入力を保持し、InputとSubjectを別の能力として提供する。初期状態では受理せず、接続開始時にstartで有効にする。live入力では初期の上限を256件とする。通知には値を載せず、Observerのon_changeは処理側の起床を予約するだけとする。通知回数と入力件数を対応させない。
+SourceはFIFOの未処理入力を保持し、InputとSubjectを別の能力として提供する。初期状態では受理せず、接続開始時にstartで有効にする。live入力では初期の上限を256件とする。
+通知には値を載せず、Observerのon_changeは処理側の起床を予約するだけとする。通知回数と入力件数を対応させない。
 
 replayは有限のイベントJSON全体を先にメモリへ読み込み、openで認識した入力を提出してから実行側が取り出す。
 この取得方式に合わせ、Sourceの容量を `max(1, len(events))` とし、有限記録の件数を理由にlive入力の上限へ抵触させない。
@@ -312,8 +315,7 @@ Sourceは失敗を保持し、takeはInputErrorを送出する。単に入力が
 CLI自身の結果出力はJSONとし、起動先のstdioはDEVNULLへ分ける。ただしSDK内部には標準出力へ直接printする診断があり、live利用時の標準出力全体がJSONだけになることは、この実装では保証しない。
 
 構成・接続・入力取得・解放に失敗した場合は、CLIが標準エラーへ診断を出し、終了コード1にする。
-操作の結果がfailedまたはunknownの場合も終了コード1を保持し、
-runをCtrl+Cで終了しても過去の失敗を成功へ置き換えない。結果に応じた自動再実行は行わない。
+操作の結果がfailedまたはunknownの場合も終了コード1を保持し、runをCtrl+Cで終了しても過去の失敗を成功へ置き換えない。結果に応じた自動再実行は行わない。
 
 CLIは通知登録の試行前から、入力元の解放とObserverの解除をfinallyで所有する。
 登録が途中で失敗した場合も両方を試みる。未登録の解除も安全に行える既存Sourceを利用する。
@@ -329,20 +331,27 @@ CLIは通知登録の試行前から、入力元の解放とObserverの解除を
 
 SDKは[MiraboxSpace/StreamDock-Device-SDK](https://github.com/MiraboxSpace/StreamDock-Device-SDK)を
 `git submodule` として `vendor/streamdock-sdk` へ配置し、
-リビジョン `fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb` へ固定する。SDKのファイルは変更しない。
+リビジョン `fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb` に固定する。SDKのファイルは変更しない。
 
 この更新にはC++ SDKのreader起床・self-join・初期化の修正と、Python SDKの入力番号・画像処理の変更がある。
 OpenDeckのC++ coreは機器SDKをリンクせず、接続には引き続きPython SDKを使う。
 C++ SDK側のworker修正を、現行のPython接続経路へ適用済みとは扱わない。
 画像・GIF・起動ロゴのAPIは今回の利用範囲に追加しない。
 
-SDKとnative transport libraryは、StreamDockFactory.makeまたはlist_devicesで機器を列挙する時に読み込む。中核処理、再生入力、純粋関数のテストをimportするだけでSDKやDLLを読み込まない。makeは列挙して製品を生成するが機器をopenしない。SDK側はTransportDLLを自分のモジュール位置から探すため、そのディレクトリ構成を保って読み込む。
+SDKとnative transport libraryは、StreamDockFactory.makeまたはlist_devicesで機器を列挙する時に読み込む。
+中核処理、再生入力、純粋関数のテストをimportするだけでSDKやDLLを読み込まない。makeは列挙して製品を生成するが機器をopenしない。
+SDK側はTransportDLLを自分のモジュール位置から探すため、そのディレクトリ構成を保って読み込む。
 
 Windows向け依存のwmi 1.5.1にはdocstring内の不正な`\_`があり、Python 3.14で初回import時にSyntaxWarningが出る。DeviceManagerのimport中だけ、wmi由来のこの警告を限定して抑制する。他の警告やimport失敗は隠さず、SDKと依存パッケージのファイルは変更しない。
 
 SDKのopenがFalseを返す場合は接続失敗として扱う。open後の初期化で例外が出た場合とは区別し、後者も入力を受理できる状態にはしない。makeで生成しただけ、または機器が列挙できただけでは、接続成功としない。
 
-Link.openはcallbackを登録してからSDKをopenし、initを実行する。`make_surface` に初期画像が指定されていれば、この時点で画像を送信する。SDKのreaderが稼働中であることを確認してからSourceを開始し、入力受理を有効にする。入力受理を有効にする前に届いたボタン入力は受理しない。起動に失敗した時や起動を中断した時もcallbackと接続資源を解放する。解放にも失敗した場合は、両方の原因を例外グループにまとめて報告する。
+`Link.open` は callback を登録してから SDK を open し、init を実行する。`make_surface` に初期画像が指定されていれば、この時点で画像を送信する。
+`prepare_display` を指定した実機サンプルでは、接続を開くスレッドで表示準備に入り、
+割り当てから得た View で描画する。
+SDK reader の稼働を確認し、Source を開始して入力受理を有効にするまで、この準備のスコープを維持する。
+入力受理を有効にする前に届いたボタン入力は受理しない。
+起動に失敗した時や起動を中断した時は、表示準備のスコープを先に抜けて割り当てを解放し、その後に SDK の callback と接続資源を解放する。接続の解放にも失敗した場合は、両方の原因を例外グループにまとめて報告する。
 
 SDKのinitは画面の起床、輝度変更、アイコン消去などを伴う。今回のアダプタが呼ぶ初期化と、その機器への影響を、実機確認の対象にする。
 
@@ -360,7 +369,9 @@ SDKのkey callbackではEventType.BUTTONのイベントを受け付ける。取�
 過去にサンプルの `device.keys` の1・2と一致せず無視された原因と、通常ボタンの補正は引き続き区別して扱う。
 サンプルや利用者の設定番号をSDKの画像配置へ合わせて変更しない。
 
-アダプタはSDKのraw callbackでパケットと受信時の入力受理状態を記録し、同じreader thread・同じ接続世代のkey callbackに対応付ける。key callbackでは、入力受理を有効にする前のパケットを、デコードが有効化後に終わっても配送しない。
+アダプタはSDKのraw callbackでパケットと受信時の入力受理状態を記録し、
+同じreader thread・同じ接続世代のkey callbackに対応付ける。
+key callbackでは、入力受理を有効にする前のパケットを、デコードが有効化後に終わっても配送しない。
 対応する通常ボタンのrawコード1から10を、SDKの画像配置由来のキー番号より優先して入力識別子に使う。
 認識・配送はkey callbackから一回だけ行い、raw callbackから二重に配送しない。SDKファイルは変更しない。
 

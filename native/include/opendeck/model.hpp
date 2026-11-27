@@ -10,7 +10,7 @@ namespace opendeck {
 
 struct Slot {
     std::string name;
-    auto operator<=>(const Slot &) const = default;
+    std::strong_ordering operator<=>(const Slot &) const = default;
 };
 
 struct Change {
