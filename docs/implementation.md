@@ -447,6 +447,11 @@ CIにはWindows・macOS・Linuxでeditable環境のpytest、native CTest、sdist
 sdistはビルドに必要なnativeソースを含み、vendorは含めない。wheelのimportとCLIはcheckoutへ依存しない隔離モードで確認する。
 CIの構成を、まだ得ていない各OSの実行結果やN4 Pro実機の適合保証とは扱わない。
 
+PR #57 では Windows・macOS・Linux の各ジョブで editable 環境の pytest、clangd、
+standalone core の CTest が成功した。
+sdist と wheel の作成、wheel の分離インストール、checkout 外での隔離 import と CLI も各 OS で成功した。
+[CI 実行結果](https://github.com/TakumiOkayasu/OpenDeck/actions/runs/45943814024)
+
 SDK `fc124cb` への更新では、Windows・CPython 3.15.2でpytest 218件、Ruff、
 Pyrightのエラー・警告0件、standalone coreのReleaseのCTest 4件を確認した。
 副画面4コードによる通常ボタンの誤解放をRedで再現してから、アダプタの補正でGreenにした。
@@ -469,5 +474,16 @@ bindingの境界は[pybind11の仮想関数](https://pybind11.readthedocs.io/en/
 2026-10-20、ユーザーからC++基盤への移行後もWindowsで操作できたとの報告を受けた。
 これはC++基盤への移行時点のWindows操作の確認として記録する。操作手順や入力の構成は今回の報告では特定されていないため、同時押し、Buttonの保持・履歴、切断・再接続、macOS実機まで確認済みとは扱わない。
 再生入力やfake機器のテスト成功を、SDK/native libraryや機器本体の適合確認に置き換えない。
+
+2026-11-26 の Windows ビルド `26300` における N4 Pro の抜き差し対照では、同じ USB ポートで切断と再列挙を確認した。
+[抜き差しの ETL 記録](https://github.com/TakumiOkayasu/OpenDeck/issues/52#issuecomment-7185318371)
+
+同じポートの自動採取では、SDK `fc124cb` を使った実機サンプルが終了コード `0` で終了した。
+通常の接続解放からプロセス終了後約10秒まで、対象機器の USB 切断・再列挙を示すイベントは記録されなかった。
+画面と接続音の記録がなく、消灯の再現とその原因は未確定である。
+[通常終了の ETL 記録](https://github.com/TakumiOkayasu/OpenDeck/issues/52#issuecomment-7186013863)
+
+現行リビジョンの再確認では、同じポートの抜き差しを対照にして、通常終了時の ETL を画面の変化と接続音に照合する。
+[USB 採取手順](../README.md#windows-で終了時の-usb-再接続を調べる)
 
 実機では通常キーと副画面入力の識別と通知列の違い、複数保持、押下順と解放順、長押し時の重複、通知欠落、抜き差し、初期化による表示への影響、純正ソフトとの同時利用可否を確認する。失敗時に操作が重複実行されないこと、終了後にreaderや監視が残らないこと、機器を再び開けることも確認する。

@@ -1,7 +1,9 @@
 # Stream Dock配布拡張の互換性調査
 
 2026-10-20に指定された2件の配布物をダウンロードし、実行せずに解析した。
-比較対象はOpenDeckのmain `9f8f922`。これは互換性の調査記録であり、個別操作を基盤の要件へ追加する文書ではない。
+解析当時の比較対象はOpenDeckのmain `9f8f922`。
+現行実装と公式ホストの境界は、2026-11-27時点のOpenDeck `4da8080` とメーカー資料を照合した。
+この文書では互換性の調査結果を扱う。
 ホストの責務と依存方向は[基本設計案](../design/extensions.md)で管理する。
 
 ## 判定
@@ -268,9 +270,11 @@ importにあるVCP操作は、[Microsoftの説明][microsoft-vcp]ではDDC/CIと
 
 ### 表示
 
-- 現行OpenDeckとの関係: 公開された描画能力と機器への出力接続は未実装
+- 現行OpenDeckとの関係: N4 Proの画像出力は公開の `View` から利用できる。
+  [表示とタッチ入力の基本設計](../design/display.md)
 - 次に確認・具体化する内容:
-  渡された画像・タイトル・状態と表示先を接続する。内容は拡張が生成する
+  互換アダプタで外部拡張が渡す画像・タイトル・状態を受け、対応する表示先に反映する。
+  表示内容は拡張が生成する。
 
 ### 拡張固有の依存
 
@@ -279,14 +283,51 @@ importにあるVCP操作は、[Microsoftの説明][microsoft-vcp]ではDDC/CIと
 
 ### 公式資料との照合と責務の境界
 
-[公式登録手順](https://sdk.key123.vip/en/guide/registration.html)では、ホストがEXEへ通信ポート、識別子、登録イベント、infoを渡す。
-[受信イベント](https://sdk.key123.vip/en/guide/events-received.html)のwillAppear/willDisappearは操作配置の出現・消失であり、プロセスの開始・終了と同一視しない。
-[送信イベント](https://sdk.key123.vip/en/guide/events-sent.html)も含め、実物が使う通信と照合する。
-公式資料にあるAPIをすべて最初から実装することや、Elgato形式全体への互換性を約束するものではない。
+公式ホストはPC上でプラグインを起動し、通信ポート、識別子、登録イベント、ホスト情報を引数で渡す。
+プラグインはローカルのWebSocketに登録し、JSONで通信する。設定画面とプラグインの通信もホストが中継する。
+[メーカーのPlugin SDK開発者資料][plugin-architecture]
+
+`manifest.json` は対応OS、実行コードの入口、提供する操作などを宣言する。
+実行条件は配布物ごとに確認する。[メーカーのmanifest仕様][plugin-manifest]
+
+`context` はホストが生成する個々の操作配置の識別子で、`willAppear` と `willDisappear` は配置の出現・消失を通知する。
+設定は `willAppear` の通知にも含まれる。配置が消えた時点で、その配置への配送や描画の終了を扱う。
+プロセスの寿命と配置の寿命は別に管理する。
+[メーカーのイベント一覧][plugin-events]
+
+公式ソフトには最小化して起動する設定がある。
+メイン画面を閉じても常駐が残るため、メーカーが案内するCompanionの直接接続では常駐プロセスも終了する。
+開発時には、子プロセスの終了を検知して公式ホストが再起動する経路がある。
+ホストの再起動や再登録をまたぐ `context` の同一性、終了時の通知順序は資料からは確認できなかった。
+[純正ソフトの設定][streamdock-interface]・[メーカーの接続方式ガイド][companion-connection]・
+[開発時の再起動手順][plugin-restart]
 
 外部形式のUUID、context、controller、画像表現は互換アダプタ内に閉じる。
 入力認識・機器用Factoryへ拡張の起動や設定を追加せず、ホストを基盤の利用側に置く。
 取得済みmanifestやメッセージの検証・変換と、プロセス起動・通信・保存・描画の副作用は分ける。
+
+### 直接接続と本体に残るデータ
+
+OpenDeckはPCから固定Device SDKのPython実装を使い、機器の列挙、接続、初期化、入力通知の受信、出力を行う。
+この接続から得られるのは機器制御で、`.sdPlugin` の起動・登録・設定管理はPC側に別途必要になる。
+[OpenDeckのSDKアダプタ](../../src/opendeck/adapters/streamdock.py)・[公式Device SDK][device-sdk]
+
+メーカーはCompanionの例で、公式ホスト経由のプラグイン接続と、Companion自身がUSBを管理する接続を分けている。
+直接接続の際は同じUSB機器を管理するアプリを一つにする。
+OpenDeckでも共用を前提とせず、機器の接続を所有するアプリを明確にする。
+[メーカーの接続方式ガイド][companion-connection]
+
+本体に保持される例は起動ロゴである。固定SDKは静止画をROMへ書き込む経路として説明しており、
+メーカーも起動ロゴが機器のリセット後に残るとしている。OpenDeckの通常描画で使う経路は別に扱う。
+[固定SDKのROM書込み説明][device-boot-rom]・[メーカーの起動ロゴガイド][boot-logo]
+
+シーンのキー割り当て、アイコン、操作等は、公式ソフトが同じ機種向けのファイルとして書き出し／読み込みできる。
+この資料からはN4 Pro本体に保持される設定の全範囲や、PC側の処理なしで動く操作の範囲、
+本体で任意の拡張コードを実行する仕組みまでは確認できなかった。
+[メーカーのシーン移行ガイド][scene-transfer]
+
+OpenDeck用の拡張を導入する方式では、PC上での実行を前提とする。
+配布済み`.sdPlugin`の再利用は、実物が必要とする公式ホスト機能をPC側で提供できる場合の候補とする。
 
 ## 次の検証候補
 
@@ -306,3 +347,13 @@ Windowsでの通信ログと実機の結果が揃うまでは、「解析上の�
 [screen-controller-product]: https://vsdinside.key123.vip/product/20250925001507?lang=ja
 [screen-controller-download]: https://cdn1.key123.vip/marketplace/streamDock/plugin/files/com.mirabox.displaycontrol.sdPlugin
 [microsoft-vcp]: https://learn.microsoft.com/en-us/windows/win32/monitor/using-the-low-level-monitor-configuration-functions
+[plugin-architecture]: https://github.com/MiraboxSpace/StreamDock-Plugin-Builder/blob/main/skills/streamdock-plugin-builder/references/architecture.md
+[plugin-manifest]: https://github.com/MiraboxSpace/StreamDock-Plugin-Builder/blob/main/skills/streamdock-plugin-builder/references/manifest.md
+[plugin-events]: https://github.com/MiraboxSpace/StreamDock-Plugin-Builder/blob/main/skills/streamdock-plugin-builder/references/events.md
+[plugin-restart]: https://github.com/MiraboxSpace/StreamDock-Plugin-Builder/blob/main/skills/streamdock-plugin-builder/references/build-and-debug.md#5-standard-workflow-and-streamdock-restart-rules
+[streamdock-interface]: https://mirabox.net/blogs/tutorial/beginner-s-guide-introduction-to-the-streamdock-software-interface
+[companion-connection]: https://mirabox.net/fr/blogs/tutorial/connect-stream-dock-to-bitfocus-companion
+[device-sdk]: https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/docs/readme.en.md#overview
+[device-boot-rom]: https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDock.py#L505-L521
+[boot-logo]: https://mirabox.net/blogs/tutorial/how-to-replace-the-boot-logo-on-streamdock
+[scene-transfer]: https://mirabox.net/es/blogs/tutorial/how-to-use-export-scene-and-import-scene-on-streamdock

@@ -48,6 +48,29 @@ def test_drawing_targets_do_not_define_input_numbering():
     assert diagnostic.targets() == {f"display-{n}": n for n in range(1, 15)}
 
 
+def test_drawing_records_the_elapsed_time_for_each_returned_call(monkeypatch):
+    import json
+    from io import StringIO
+    from types import SimpleNamespace
+
+    clock = iter([1_000_000, 3_500_000, 8_000_000, 9_000_000])
+    monkeypatch.setattr(diagnostic.time, "perf_counter_ns", lambda: next(clock))
+    monkeypatch.setattr("builtins.input", lambda _: "")
+    view = SimpleNamespace(draw=lambda _: None)
+    product = SimpleNamespace(screen=view, images={"display-3": view})
+    output = StringIO()
+
+    diagnostic.draw_images(product, {"display-3": 3}, output)
+
+    rows = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert [
+        (row["type"], row["target"], row["label"], row["elapsed_ms"]) for row in rows
+    ] == [
+        ("image_sent", "background", "BG", 2.5),
+        ("image_sent", "display-3", "D3", 1.0),
+    ]
+
+
 def test_default_log_directory_is_created_on_first_run(monkeypatch, tmp_path):
     import sys
     from types import ModuleType, SimpleNamespace
@@ -131,7 +154,7 @@ def test_diagnostic_closes_connection_when_interrupted(monkeypatch, tmp_path):
 
 def test_connection_is_closed_if_drawing_fails(monkeypatch):
     import json
-    from io import StringIO as BytesIOText
+    from io import StringIO
     from types import SimpleNamespace
 
     import pytest
@@ -144,14 +167,22 @@ def test_connection_is_closed_if_drawing_fails(monkeypatch):
 
     product = SimpleNamespace(
         link=SimpleNamespace(open=lambda: None, close=lambda: closed.append(True)),
-        screen=BrokenView(),
+        screen=SimpleNamespace(draw=lambda _: None),
+        images={"display-3": BrokenView()},
     )
+    clock = iter([1_000_000, 2_000_000, 5_000_000, 8_250_000])
+    monkeypatch.setattr(diagnostic.time, "perf_counter_ns", lambda: next(clock))
     monkeypatch.setattr("builtins.input", lambda _: "")
-    output = BytesIOText()
+    output = StringIO()
     with pytest.raises(RuntimeError, match="transfer failed"):
-        diagnostic.run(product, {}, output)
+        diagnostic.run(product, {"display-3": 3}, output)
     assert closed == [True]
-    error = json.loads(output.getvalue().splitlines()[-1])
+    sent, failed, error = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert sent["type"] == "image_sent"
+    assert failed["type"] == "image_failed"
+    assert failed["target"] == "display-3"
+    assert failed["label"] == "D3"
+    assert failed["elapsed_ms"] == 3.25
     assert error["type"] == "error"
     assert "RuntimeError: transfer failed" in error["traceback"]
 
