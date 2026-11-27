@@ -24,10 +24,64 @@ SDKのサイズは画像変換の入力キャンバスであり、上記だけ�
 アニメーションは別の機構であり、静止画の描画だけでアニメーションを提供したとはしない。
 
 `set_touchscreen_image`は名前に反して起動ロゴのROM書込みであり、SDK自身が繰り返しの描画に使用しないよう説明している。
-動的表示は`set_frame_background` / `set_background_frame_stream`の経路を調べる。
-フレーム送信はPython wrapperから成否を取得できず、呼び出しが戻っただけでは実機の表示完了を保証できない。
+背景の動的表示には `set_frame_background` が呼ぶ `set_background_frame_stream` を使う。
 [SDKの実装](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDock.py#L324-L366)
 と[ROM書込みの注意](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDock.py#L505-L521)を参照。
+
+## 画像とLEDの出力結果
+
+固定SDKのC APIは各出力から `TransportResult` を返す。
+ヘッダーは成功を0とし、通信書込み失敗、書込みのタイムアウトなどのエラーを定義する。
+N4 Proの機種設定ではRGB LEDを4個とし、個別色指定を有効にしている。
+[C APIの結果コード][transport-results]・[出力関数][transport-output]・[機種設定][device-options]
+
+| 出力 | C API | Python SDKが呼び出し元へ返す結果 |
+| --- | --- | --- |
+| 通常ボタン・副画面の画像 | `transport_set_key_image_stream` | C APIの結果 |
+| 背景フレーム | `transport_set_background_frame_stream` | C APIの結果を破棄し、`None` |
+| LEDの明るさ | `transport_set_led_brightness` | C APIの結果を破棄し、`None` |
+| LEDの一括色指定 | `transport_set_led_color` | C APIの結果を破棄し、`None` |
+| LEDの個別色指定 | `transport_set_single_led_color` | C APIの結果 |
+| LED効果のリセット | `transport_reset_led_color` | C APIの結果 |
+
+表は機器ハンドルがあり、各関数がC APIを呼んだ場合の結果を示す。
+画像の変換やキーの検証でSDKが所定の例外を捕捉した場合は `-1` が返る。
+個別のLED色指定は色リストが空なら送信せずに戻る。
+C++ SDKのラッパーは表のすべての出力からC APIの結果を返さない。
+[画像の変換と例外処理][device-output]・[Pythonの画像転送][python-images]・
+[LEDの機種別分岐][device-leds]・[PythonのLED転送][python-leds]・[C++ラッパー][cpp-output]
+
+現行OpenDeckは通常ボタン・副画面の画像で0以外をエラーにし、背景ではSDKが返す `-1` をエラーにする。
+背景のC APIが非ゼロを返してもPython SDKで失われるため、現行の描画経路ではその値を検出できない。
+LEDの制御はSDKにあり、現行OpenDeckの表示能力には接続していない。
+[描画の実装](../../src/opendeck/adapters/streamdock.py#L273-L290)・[表示の契約](../design/display.md)
+
+### 受付・USB転送・応答・実機反映
+
+- `can_write()` は現在の書込み可否、`get_last_error_info()` はtransportの直近のエラー情報を返す。
+  いずれも個々の出力要求に対応する転送結果や、表示・LEDの現在状態を取得するAPIではない。
+  [書込み可否][python-can-write]・[エラー情報][python-last-error]
+- C APIの成功が受付、USB転送の完了、機器ACKのどこまでを表すかは、公開ヘッダーから確定できない。
+  Python SDKの入力経路は `ACK ARX` をタッチ座標として解釈し、描画やLED出力のリクエストには対応付けていない。
+  [出力関数と読取り関数][transport-output]・[タッチの解析][touch-ack]
+- 画像・LEDの現在状態を照会する公開契約や、要求ごとの完了通知は、調査した固定SDKの公開APIでは確認できなかった。
+  SDKの返り値やUSB転送の観測だけで、画面への表示やLEDの発光が完了したとは判断できない。
+
+[#41](https://github.com/TakumiOkayasu/OpenDeck/issues/41) では、この調査をもとに、
+出力ごとの返り値とUSBの観測、対応する機器応答、目視結果を照合する。
+アダプタが取得できる失敗を呼び出し側へ届ける方法と試験、および物理的な反映を確認できる範囲は引き続き検討する。
+
+[transport-results]: https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/CPP-SDK/src/Transport/TransportDLL/transport_c.h#L25-L77
+[transport-output]: https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/CPP-SDK/src/Transport/TransportDLL/transport_c.h#L125-L163
+[device-options]: https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDockN4Pro.py#L259-L267
+[device-output]: https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDock.py#L324-L366
+[device-leds]: https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDock.py#L188-L206
+[python-images]: https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Transport/LibUSBHIDAPI.py#L649-L704
+[python-leds]: https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Transport/LibUSBHIDAPI.py#L719-L773
+[cpp-output]: https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/CPP-SDK/src/Transport/TransportCWrapper.cpp#L147-L224
+[python-can-write]: https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Transport/LibUSBHIDAPI.py#L521-L536
+[python-last-error]: https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Transport/LibUSBHIDAPI.py#L991-L1028
+[touch-ack]: https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDockN4Pro.py#L53-L85
 
 ## タッチとスワイプ
 
