@@ -19,6 +19,7 @@ from .ports import (
     read_view,
     subject_view,
 )
+from .volume import OutputVolume, VolumeError, VolumeFailure
 
 __all__ = [
     "Action",
@@ -33,6 +34,7 @@ __all__ = [
     "Input",
     "InputError",
     "Observer",
+    "OutputVolume",
     "Read",
     "Result",
     "Slot",
@@ -42,6 +44,8 @@ __all__ = [
     "Swipe",
     "TouchPoint",
     "View",
+    "VolumeError",
+    "VolumeFailure",
     "input_view",
     "read_view",
     "subject_view",

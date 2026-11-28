@@ -214,6 +214,7 @@ SDK・実機・外部アプリを必要としない実行例も[実装ガイド]
 - [入力APIの対応計画](docs/plans/input-api.md)
 - [実装設計・SDKの適合・実機確認](docs/implementation.md)
 - [アプリケーション・拡張の実装ガイド](docs/extensions.md)
+- [既定の音声出力を操作する契約](docs/design/output-volume.md)
 
 開発エージェントの作業規約と文書の読み順は[AGENTS.md](AGENTS.md)に置く。
 
