@@ -1,0 +1,12 @@
+{
+  "inputs": ["quiet", "loud", "mute", "unmute"],
+  "chords": [],
+  "device": {"keys": {"1": "quiet", "2": "loud", "3": "mute", "4": "unmute"}},
+  "actions": {
+    "quiet": {"kind": "volume", "level": 0.25},
+    "loud": {"kind": "volume", "level": 0.5},
+    "mute": {"kind": "mute", "muted": true},
+    "unmute": {"kind": "mute", "muted": false}
+  },
+  "bindings": {"quiet": "quiet", "loud": "loud", "mute": "mute", "unmute": "unmute"}
+}
