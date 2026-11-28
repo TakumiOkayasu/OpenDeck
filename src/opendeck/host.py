@@ -9,11 +9,143 @@ from threading import Lock
 from typing import Literal, Protocol
 
 from .model import Result, Slot, Status
-from .ports import Input, Observer, Subject, View
+from .ports import Input, InputError, Observer, Subject, View
+from .source import Source
 
 
 class AsyncAction(Protocol):
     async def run(self) -> Result: ...
+
+
+class _Wake(Observer):
+    def __init__(self, loop: asyncio.AbstractEventLoop, ready: asyncio.Event) -> None:
+        self._loop = loop
+        self._ready = ready
+        self._lock = Lock()
+        self._active = True
+
+    def on_change(self) -> None:
+        with self._lock:
+            if self._active:
+                self._loop.call_soon_threadsafe(self._ready.set)
+
+    def deactivate(self) -> None:
+        with self._lock:
+            self._active = False
+
+
+async def _listen[T](
+    loop: asyncio.AbstractEventLoop,
+    take: Callable[[], T | None],
+    subject: Subject,
+    deliver: Callable[[T], None],
+    on_ready: Callable[[], None] | None,
+) -> None:
+    ready = asyncio.Event()
+    wake = _Wake(loop, ready)
+    try:
+        subject.add(wake)
+        while True:
+            ready.clear()
+            item = take()
+            if on_ready is not None:
+                on_ready()
+                on_ready = None
+            while item is not None:
+                deliver(item)
+                await asyncio.sleep(0)
+                item = take()
+            await ready.wait()
+    finally:
+        # A producer may already hold a snapshot of registered observers.
+        wake.deactivate()
+        subject.remove(wake)
+
+
+class Subscription[T]:
+    def __init__(self, share: InputShare[T], capacity: int) -> None:
+        self._share = share
+        self._source = Source[T](capacity)
+        self._source.start()
+
+    @property
+    def input(self) -> Input[T]:
+        return self._source.input
+
+    @property
+    def subject(self) -> Subject:
+        return self._source.subject
+
+    def close(self) -> None:
+        self._share._check_loop()
+        self._share._subscribers.discard(self)
+        self._source.fail("subscription is closed")
+
+
+class InputShare[T]:
+    """Deliver one selected input stream to independent, bounded recipients."""
+
+    def __init__(self, source: Input[T], subject: Subject) -> None:
+        self._loop = asyncio.get_running_loop()
+        self._source = source
+        self._subject = subject
+        self._subscribers: set[Subscription[T]] = set()
+        self._closed = False
+        self._listening = False
+
+    def _check_loop(self) -> None:
+        if asyncio.get_running_loop() is not self._loop:
+            raise RuntimeError("use the input share on its owning event loop")
+
+    def _check_active(self) -> None:
+        self._check_loop()
+        if self._closed:
+            raise RuntimeError("input sharing stopped")
+
+    def subscribe(self, *, capacity: int) -> Subscription[T]:
+        self._check_active()
+        subscription = Subscription(self, capacity)
+        self._subscribers.add(subscription)
+        return subscription
+
+    async def listen(self, *, on_ready: Callable[[], None] | None = None) -> None:
+        self._check_active()
+        if self._listening:
+            raise RuntimeError("input share is already listening")
+        self._listening = True
+        try:
+            await _listen(
+                self._loop, self._take, self._subject, self._deliver, on_ready
+            )
+        finally:
+            self._stop("input sharing stopped")
+
+    def _stop(self, error: str) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        subscribers = tuple(self._subscribers)
+        self._subscribers.clear()
+        notifications = [
+            subscription._source.record_failure(error) for subscription in subscribers
+        ]
+        for observers in notifications:
+            Source.notify(observers)
+
+    def _take(self) -> T | None:
+        try:
+            return self._source.take()
+        except InputError as error:  # codex-rule-ignore: propagates source failure
+            self._stop(str(error))
+            raise
+
+    def _deliver(self, item: T) -> None:
+        notifications = [
+            subscription._source.enqueue(item)[1]
+            for subscription in tuple(self._subscribers)
+        ]
+        for observers in notifications:
+            Source.notify(observers)
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,41 +284,7 @@ class AsyncHost:
         input source once, even when it is empty.
         """
         self._check_loop()
-        ready = asyncio.Event()
-        loop = self._loop
-
-        class Wake(Observer):
-            def __init__(self) -> None:
-                self._lock = Lock()
-                self._active = True
-
-            def on_change(self) -> None:
-                with self._lock:
-                    if self._active:
-                        loop.call_soon_threadsafe(ready.set)
-
-            def deactivate(self) -> None:
-                with self._lock:
-                    self._active = False
-
-        wake = Wake()
-        try:
-            subject.add(wake)
-            while True:
-                ready.clear()
-                slot = source.take()
-                if on_ready is not None:
-                    on_ready()
-                    on_ready = None
-                while slot is not None:
-                    self.dispatch(slot)
-                    await asyncio.sleep(0)
-                    slot = source.take()
-                await ready.wait()
-        finally:
-            # A producer may already hold a snapshot of registered observers.
-            wake.deactivate()
-            subject.remove(wake)
+        await _listen(self._loop, source.take, subject, self.dispatch, on_ready)
 
     def dispatch(self, slot: Slot) -> None:
         self._check_loop()
