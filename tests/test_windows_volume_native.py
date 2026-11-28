@@ -64,15 +64,21 @@ def test_native_reader_borrows_the_callers_existing_sta_apartment():
         ole.CoGetApartmentType.restype = ctypes.c_long
         ole.CoUninitialize.argtypes = []
         ole.CoUninitialize.restype = None
-        assert ole.CoInitializeEx(None, 2) in (0, 1)
-        try:
-            status, _ = _native._read_output_volume()
-            assert status != 0x80010106  # RPC_E_CHANGED_MODE
+
+        def apartment_type():
             kind = ctypes.c_int()
             qualifier = ctypes.c_int()
             result = ole.CoGetApartmentType(ctypes.byref(kind), ctypes.byref(qualifier))
             assert result == 0
-            assert kind.value == 0  # APTTYPE_STA
+            return kind.value, qualifier.value
+
+        assert ole.CoInitializeEx(None, 2) in (0, 1)
+        try:
+            before = apartment_type()
+            assert before[0] in (0, 3)  # APTTYPE_STA, APTTYPE_MAINSTA
+            status, _ = _native._read_output_volume()
+            assert status != 0x80010106  # RPC_E_CHANGED_MODE
+            assert apartment_type() == before
         finally:
             ole.CoUninitialize()
 
