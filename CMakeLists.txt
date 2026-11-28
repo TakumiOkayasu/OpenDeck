@@ -41,6 +41,13 @@ if(OPENDECK_BUILD_PYTHON)
     pybind11_add_module(_native native/python/module.cpp)
     target_include_directories(_native PRIVATE native/private)
     target_link_libraries(_native PRIVATE opendeck_core)
+    if(WIN32)
+        target_sources(_native PRIVATE
+            native/python/windows_volume.cpp
+            native/python/windows_volume_binding.cpp
+        )
+        target_link_libraries(_native PRIVATE ole32)
+    endif()
     install(TARGETS _native DESTINATION opendeck)
 endif()
 

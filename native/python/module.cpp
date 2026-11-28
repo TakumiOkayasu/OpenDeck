@@ -15,6 +15,10 @@
 namespace py = pybind11;
 using namespace opendeck;
 
+#ifdef _WIN32
+void bind_windows_volume(py::module_ &module);
+#endif
+
 namespace {
 
 py::object method(py::handle object, const char *name) {
@@ -331,6 +335,9 @@ private:
 } // namespace
 
 PYBIND11_MODULE(_native, m) {
+#ifdef _WIN32
+    bind_windows_volume(m);
+#endif
     py::register_exception<InputError>(m, "InputError", PyExc_RuntimeError);
     py::class_<SourceBridge, std::shared_ptr<SourceBridge>>(m, "Source")
         .def(py::init<std::size_t>(), py::arg("capacity") = 256)

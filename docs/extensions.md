@@ -19,6 +19,7 @@ Python側はABCを明示的に継承して実装する。保証の範囲と公�
 - [契約の表現](implementation.md#契約の表現)
 - [ボタン能力](design/buttons.md)
 - [操作の生成と登録](implementation.md#操作の生成と登録)
+- [既定の音声出力を操作する契約](design/output-volume.md)
 
 ## 公開契約をimportする
 

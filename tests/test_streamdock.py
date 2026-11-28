@@ -17,6 +17,94 @@ from opendeck.ports import ButtonProduct, Observer, Product
 from opendeck.source import InputError
 
 
+def test_callback_diagnostics_correlate_raw_before_input_is_dequeued(caplog):
+    device = FakeN4Pro()
+    sdk = streamdock._Sdk(FakeManager([device]), FakeN4Pro, "button")
+    with patch.object(streamdock, "_load", return_value=sdk):
+        product = StreamDockFactory({1: Slot("primary")}, (), Path("sdk")).make()
+    with caplog.at_level("DEBUG", logger="opendeck.adapters.streamdock"):
+        product.link.open()
+        try:
+            device.emit_packet(1, 1)
+            device.emit_packet(1, 0)
+            device.emit(1, 1)
+            rows = [
+                record.diagnostic
+                for record in caplog.records
+                if hasattr(record, "diagnostic")
+                and record.diagnostic["kind"].startswith("sdk_")
+            ]
+            assert [row["kind"] for row in rows] == [
+                "sdk_raw",
+                "sdk_decoded",
+                "sdk_raw",
+                "sdk_decoded",
+                "sdk_decoded",
+            ]
+            assert [row["packet_id"] for row in rows] == [1, 1, 2, 2, None]
+            assert rows[0]["raw"] == input_packet(1, 1).hex()
+            assert all(row["generation"] == 1 for row in rows)
+            assert all(row["received_monotonic_ns"] > 0 for row in rows)
+            assert product.input.take() == Slot("primary")
+        finally:
+            product.link.close()
+
+
+def test_diagnostic_metadata_describes_the_opened_device(caplog):
+    device = FakeN4Pro()
+    sdk = streamdock._Sdk(FakeManager([device]), FakeN4Pro, "button")
+    with patch.object(streamdock, "_load", return_value=sdk):
+        product = StreamDockFactory({1: Slot("primary")}, (), Path("sdk")).make()
+    with caplog.at_level("DEBUG", logger="opendeck.adapters.streamdock"):
+        product.link.open()
+        product.link.close()
+
+    rows = [
+        record.diagnostic
+        for record in caplog.records
+        if hasattr(record, "diagnostic") and record.diagnostic["kind"] == "device"
+    ]
+    assert rows == [
+        {
+            "kind": "device",
+            "model": "FakeN4Pro",
+            "serial": "one",
+            "vendor_id": 0x5548,
+            "product_id": 0x1008,
+            "firmware": "fake-firmware",
+        }
+    ]
+
+
+def test_touch_receipt_does_not_claim_an_unproven_raw_packet(caplog):
+    class TouchDevice(FakeN4Pro):
+        def set_touchscreen_callback(self, callback):
+            self.touch = callback
+
+    device = TouchDevice()
+    sdk = streamdock._Sdk(FakeManager([device]), FakeN4Pro, "button")
+    with patch.object(streamdock, "_load", return_value=sdk):
+        product = StreamDockFactory({1: Slot("primary")}, (), Path("sdk")).make_surface(
+            {}
+        )
+    with caplog.at_level("DEBUG", logger="opendeck.adapters.streamdock"):
+        product.link.open()
+        try:
+            device.emit_raw(input_packet(1, 1))
+            device.touch(device, SimpleNamespace(x=2, y=3))
+        finally:
+            product.link.close()
+    rows = [
+        record.diagnostic
+        for record in caplog.records
+        if hasattr(record, "diagnostic") and record.diagnostic["kind"] == "sdk_touch"
+    ]
+    assert len(rows) == 1
+    assert rows[0]["packet_id"] is None
+    assert rows[0]["received_monotonic_ns"] > 0
+    assert (rows[0]["x"], rows[0]["y"]) == (2, 3)
+
+
 class FakeTransport:
     def __init__(self, device: FakeN4Pro) -> None:
         self.device = device
@@ -618,6 +706,18 @@ class StreamDockTests(unittest.TestCase):
                     self.assertIsNone(product.input.take())
                 finally:
                     product.link.close()
+
+    def test_standalone_secondary_release_does_not_form_action_input(self):
+        device = FakeN4Pro()
+        keys = {11 + index: Slot(f"touch-{index + 1}") for index in range(4)}
+        product = self.make([device], keys=keys)
+        product.link.open()
+        self.addCleanup(product.link.close)
+
+        for code in range(0x40, 0x44):
+            with self.subTest(code=code):
+                device.emit_packet(code, 0)
+                self.assertIsNone(product.input.take())
 
     def test_sdk_filtered_packets_do_not_publish_or_corrupt_the_next_input(self):
         device = FakeN4Pro()

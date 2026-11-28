@@ -7,6 +7,12 @@ N4 Proでは `StreamDockFactory.make_surface(images)` が既存のボタン入�
 各 `product.images[slot]` は対応する表示先、`product.screen` は画面の背景を表す。
 接続を開いている間に描画し、使用後は閉じる。
 
+ボタンの保持状態と開始・終了も必要な場合は、
+`StreamDockFactory.make_button_surface(images)` で `ButtonSurfaceProduct` を構成する。
+`product.buttons[slot]` の Button とタッチ入力・描画先は同じ Link を共有する。
+保持入力から操作を成立させる解釈は利用側に置く。
+`make_buttons()` と `make_surface()` を別々に呼ぶと、それぞれの製品が接続口を持つ。
+
 ```python
 from pathlib import Path
 
@@ -23,6 +29,19 @@ try:
 finally:
     product.link.close()
 ```
+
+保持入力を使う場合も接続を開く所有者は一つにする。
+各拡張には組み立て側が選んだ Button の読取・履歴・通知や View を渡す。
+Button の状態と履歴は[ボタン能力の整合条件](buttons.md#整合条件)に従い、
+接続終了や入力失敗で利用不能になる。
+初期画像と `prepare_display` は両方の surface 構成で利用でき、
+初期描画や準備の失敗は接続・callback の解放を伴う。
+別プロセスや純正ソフトとの USB 排他、
+sleep・抜き差し後の再接続と希望出力の復元は実機を含む確認事項として残る。
+
+fake では、所有側が閉じた同じ Link を明示的に開き、設定した初期画像が再送されることを確認した。
+終了時点の未取得入力は、次の接続の Action 呼び出しには引き継がれない。
+実行中に描いた画像の保持や、物理的な再接続後に同じ機器を開けるかは、別途確認する。
 
 画像のデコード、サイズ変換、回転、転送形式は公式SDKに委譲する。形式とサイズの根拠は[画像表示とタッチ入力の調査](../research/n4pro-display-touch.md#機器とsdkの表示能力)に置く。SDKのボタン画像転送の非ゼロ結果は失敗として通知する。背景転送には完了応答がなく、呼び出しの正常終了は実機への描画完了を保証しない。起動画面を書き換えるSDKのAPIは使用しない。
 
