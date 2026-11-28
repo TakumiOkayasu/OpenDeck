@@ -157,5 +157,6 @@ Issue #42では、個別の入力工程、callback受信時刻・raw対応、SDK
 画像要求は `image_sent` / `image_failed` と所要時間で確認する。
 切断・キューあふれ等の入力失敗は公開入力から伝播する `error` の型、message、tracebackで確認し、
 callback記録が存在することを公開入力への配送成功と扱わない。
-LED要求の記録は公開LED能力が未実装のため対象外で、LEDの契約と実機確認はIssue #39に残る。
+[LEDの個別診断](n4pro-led-diagnostic.md)では、指定した4色の要求、SDKの結果、所要時間を記録する。
+公開LED能力の契約と実機確認はIssue #39に残る。
 今回の自動テストはfakeの観測地点・対応付けを確認しており、新規のN4 Pro実機観測は行っていない。

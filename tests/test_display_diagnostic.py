@@ -501,6 +501,55 @@ def test_connection_is_closed_if_drawing_fails(monkeypatch):
     assert "RuntimeError: transfer failed" in error["traceback"]
 
 
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        ("disconnect", "N4 Pro disconnected"),
+        ("overflow", "Input capacity exceeded"),
+        ("invalid_touch", "Invalid touch coordinates"),
+    ],
+)
+def test_diagnostic_preserves_the_input_failure_in_jsonl(monkeypatch, failure, message):
+    import json
+    from io import StringIO
+    from types import SimpleNamespace
+
+    from test_streamdock import Wake
+    from test_surface import DisplayDevice, surface
+
+    from opendeck import InputError
+    from opendeck.adapters import streamdock
+
+    device = DisplayDevice()
+    product = surface(device)
+    wake = Wake()
+    product.subject.add(wake)
+    monkeypatch.setattr(streamdock, "_POLL_INTERVAL", 0.01)
+
+    def start_recording(_prompt):
+        if failure == "disconnect":
+            device.transport.present = False
+            assert wake.event.wait(2)
+        elif failure == "overflow":
+            for _ in range(257):
+                device.emit_packet(1, 1)
+                device.emit_packet(1, 0)
+        else:
+            device.touch_callback(device, SimpleNamespace(x="invalid", y=0))
+        return ""
+
+    monkeypatch.setattr("builtins.input", start_recording)
+    output = StringIO()
+    with pytest.raises(InputError, match=message):
+        diagnostic.run(product, {}, output, ("button_1",))
+
+    (error,) = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert error["type"] == "error"
+    assert error["error_type"] == "InputError"
+    assert message in error["message"]
+    assert device.closed == [False]
+
+
 def test_diagnostic_reports_success_after_closing(monkeypatch, capsys):
     import json
     from io import StringIO
