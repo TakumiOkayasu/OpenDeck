@@ -1,8 +1,7 @@
 import argparse
 import json
-import sys
-from collections.abc import Callable, Iterator, Mapping
-from contextlib import ExitStack, contextmanager
+from collections.abc import Callable, Mapping
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,8 +13,8 @@ from opendeck import (
     Slot,
     Status,
     VolumeError,
-    VolumeFailure,
 )
+from opendeck.adapters._system_volume import system_output
 from opendeck.adapters.replay import Edge, ReplayFactory
 from opendeck.config import Settings, parse
 from opendeck.ports import Product
@@ -143,24 +142,6 @@ def dispatch(product: Product, settings: Settings, *, live: bool) -> int:
         except KeyboardInterrupt:  # codex-rule-ignore: normal foreground cancellation
             print("Stopped.")  # codex-rule-ignore: sample console output
     return int(failed)
-
-
-@contextmanager
-def system_output() -> Iterator[OutputVolume]:
-    if sys.platform == "win32":
-        from opendeck.adapters.windows_volume import WindowsOutputVolume
-
-        adapter = WindowsOutputVolume()
-    elif sys.platform == "darwin":
-        from opendeck.adapters.macos_volume import MacOSOutputVolume
-
-        adapter = MacOSOutputVolume()
-    else:
-        raise VolumeError(VolumeFailure.UNSUPPORTED, "Windows or macOS is required")
-    try:
-        yield adapter
-    finally:
-        adapter.close()
 
 
 def main(argv: list[str] | None = None) -> int:

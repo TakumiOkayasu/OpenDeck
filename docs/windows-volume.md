@@ -60,5 +60,7 @@ Observer の予期しない例外はログへ報告し、native 登録の解放�
 試験の音量・ミュート変更は fake の状態だけを操作する。
 LLVM 23.1.3、Windows SDK 10.0.26100.7705、MSVC の CRT と CPython 3.15.2 の Windows 用ライブラリで、
 x64 の `_native.pyd` をクロスコンパイル・リンクし、`PyInit__native` のエクスポートを確認した。
-[Windows 上の読み取り専用の確認](../tests/test_windows_volume_native.py)は用意したが、Windows 上での実行は未実施。
+[Windows の CI](https://github.com/TakumiOkayasu/OpenDeck/actions/runs/46109804290/job/140870585483)で、
+[読み取りと通知の登録・解放の試験](../tests/test_windows_volume_native.py)を含む 434 件が通過した。
 実際の音量・ミュート変更、外部通知、既定出力切替、切断と再接続の実機確認も残る。
+[読取専用の診断](output-volume-diagnostic.md)を使うと、実機での手動操作と通知後の取得結果を照合できる。
