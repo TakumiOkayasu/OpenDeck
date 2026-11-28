@@ -85,6 +85,20 @@ class SurfaceProduct:
         object.__setattr__(self, "images", MappingProxyType(dict(self.images)))
 
 
+@dataclass(frozen=True, slots=True)
+class ButtonSurfaceProduct:
+    link: Link
+    buttons: Mapping[Slot, Button]
+    touch: Input[TouchPoint | Swipe]
+    touch_subject: Subject
+    images: Mapping[Slot, View]
+    screen: View
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "buttons", MappingProxyType(dict(self.buttons)))
+        object.__setattr__(self, "images", MappingProxyType(dict(self.images)))
+
+
 class Factory(ABC):
     @abstractmethod
     def make(self) -> Product: ...
