@@ -21,6 +21,14 @@
 Actionの差替え、設定・配送、SDKへの非依存を確認するものがある。
 これらのテストの存在を、未実装の回転や押しながら回転の検証成功とは扱わない。
 
+## 既存ログで確認したノブの通知
+
+[公開ログ](https://github.com/TakumiOkayasu/OpenDeck/wiki/RawInput-Test-Values)の Wiki リビジョン `1576295` では、4つの SDK ノブ ID それぞれに、方向が `LEFT` と `RIGHT` の回転通知と、`state=1` の押下通知がある。
+追記には押しながら左へ回す操作も挙げられている。ログに個々の操作の区切りがないため、どの回転通知が押下中のものかは特定できない。
+同ログで `KNOB_PRESS` の `state=0` は確認できない。
+[固定 SDK のデコーダー](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDockN4Pro.py#L164-L203)は、回転の方向を返すが回転量を返さない。
+解放と押下中の回転は、[個別の入力工程](../n4pro-display-diagnostic.md#タッチ副画面ノブの追加観測)を使い、実際に操作した区間と raw・SDK 通知を照合してから公開契約を決める。
+
 ## 設計から実装へ進める順序
 
 1. 利用側の例として、単発押下・通常回転・押しながら回転へ独立した操作を割り当てる流れを記述する。

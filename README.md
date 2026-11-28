@@ -138,6 +138,15 @@ pwsh -NoProfile -File .\tools\n4pro_usb_trace.ps1 -Scenario PhysicalReconnect
 採取区間、プロセスの終了コード、有効なプロバイダー、取得できた SDK リビジョンは `markers.txt` で確認する。
 サンプルの `INPUT OK` は `opendeck-stdout.txt`、入力準備と接続解放前後の時刻（UTC）は
 `opendeck-stderr.txt`、イベントの損失は `summary.txt` で確認する。
+消灯を調べる回は `INPUT OK` 以降から採取停止まで画面と音を観察し、見え方や音が変わった時刻を控える。
+接続解放の前後を同じ回のログと照合できるよう、時刻は UTC（または UTC オフセット付き）で記録する。
+報告には次の項目を含める。
+
+- Windows のビルド、SDK リビジョン、N4 Pro の VID/PID と対象ポートの経路。
+- 接続解放の前後で画面が消灯したか、再点灯したか、変化した時刻。観察できなかった項目はその旨を記す。
+- Windows の接続音の有無と聞こえた時刻。音だけから対象機器を判定しない。
+- 同じポートの物理抜き差しで識別できたイベント、終了時の対象イベントの有無、採取の損失件数。
+
 サンプルの失敗やタイムアウトは通常終了として扱わない。生の ETL には他の USB 機器の情報も含まれるため、公開 Issue には対象ポートの抜粋だけを記録する。
 対象ポートを特定できない、対照で抜き差しを検出できない、イベントに欠落がある場合は判定を保留する。
 必要に応じて保存された ETL を Windows Performance Analyzer で開く。
@@ -195,6 +204,8 @@ SDK・実機・外部アプリを必要としない実行例も[実装ガイド]
 - [拡張ホストの設計・実装プラン](docs/plans/extension-host.md)
 - [配布拡張の互換性調査](docs/compatibility/streamdock.md)
 - [N4 Proの画像表示とタッチ入力の調査](docs/research/n4pro-display-touch.md)
+- [N4 Proの画面・タッチ・ノブ診断](docs/n4pro-display-diagnostic.md)
+- [N4 ProのLED診断](docs/n4pro-led-diagnostic.md)
 - [ボタン操作の基本設計](docs/design.md)
 - [ボタン入力の要件](docs/requirements/buttons.md)
 - [回転入力の要件](docs/requirements/rotation.md)

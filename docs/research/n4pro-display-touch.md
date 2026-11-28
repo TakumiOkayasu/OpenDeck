@@ -51,10 +51,13 @@ C++ SDKのラッパーは表のすべての出力からC APIの結果を返さ�
 [画像の変換と例外処理][device-output]・[Pythonの画像転送][python-images]・
 [LEDの機種別分岐][device-leds]・[PythonのLED転送][python-leds]・[C++ラッパー][cpp-output]
 
-現行OpenDeckは通常ボタン・副画面の画像で0以外をエラーにし、背景ではSDKが返す `-1` をエラーにする。
+OpenDeckは通常ボタン・副画面の画像描画で、SDKによる拒否 (`-1`)、
+転送結果なし (`None`)、C APIの非ゼロ結果をそれぞれ `StreamDockError` で知らせる。
+例外メッセージにSDKの画像スロット番号を含め、C APIが返したエラーコードは16進数で記録する。
+背景ではSDKが返す `-1` を背景画像の拒否として通知する。
 背景のC APIが非ゼロを返してもPython SDKで失われるため、現行の描画経路ではその値を検出できない。
 LEDの制御はSDKにあり、現行OpenDeckの表示能力には接続していない。
-[描画の実装](../../src/opendeck/adapters/streamdock.py#L273-L290)・[表示の契約](../design/display.md)
+[描画の実装](../../src/opendeck/adapters/streamdock.py)・[表示の契約](../design/display.md)
 
 ### 受付・USB転送・応答・実機反映
 
@@ -92,8 +95,17 @@ LEDの制御はSDKにあり、現行OpenDeckの表示能力には接続してい
 [固定SDK](https://github.com/MiraboxSpace/StreamDock-Device-SDK/blob/fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb/Python-SDK/src/StreamDock/Devices/StreamDockN4Pro.py#L53-L119)は、
 `ACK ARX`形式の座標をタッチ用callbackから通知する。
 別の入力callbackでは左右のスワイプを通知する。
-2026-11-12の実機ログでは、指を左へ動かした3回でSDKがright、右へ動かした5回でleftを通知した。SDKの方向名が何を意味するか、その設計意図は未確認である。これはタッチの開始・終了や座標範囲を保証するものではない。
+2026-11-12の[方向比較の記録](https://github.com/TakumiOkayasu/OpenDeck/commit/e4d3285e)には、指を左へ動かした3回でSDKがright、右へ動かした5回でleftを通知したとの報告がある。
+同日の[公開JSONL](https://github.com/TakumiOkayasu/OpenDeck/wiki/%60tools-n4pro_display_diagnostic.py%60-%E3%81%A7%E5%8F%96%E5%BE%97%E3%81%97%E3%81%9F%E5%80%A4)の `swipe` は7件で、そのうち2件に工程が記録されていない。
+公開JSONLの工程と方向値だけでは、方向比較の全件を照合できない。SDKの方向名の設計意図とスワイプのしきい値も未確認である。
+
+同じ公開JSONLの374件の `touch` では、観測した座標が X `1–795`、Y `1–119` に収まった。
+左側の工程では小さいX、右側では大きいXを記録し、左右それぞれで下側の工程は上側よりYが大きい。
+これは採取した位置の比較で、座標原点や画面端の全範囲、開始・終了や複数指の仕様は引き続き確認が必要である。
 座標列から押下・解放・タップを推測して合成しない。
+
+[公開rawログ](https://github.com/TakumiOkayasu/OpenDeck/wiki/RawInput-Test-Values#touchable-display)には、副画面の `0x40` がSDKのキー `1`、`state=0` となり、OpenDeckが入力 `11` に補正した記録がある。
+その実行の割り当てには入力 `11` がなかった。固定SDKのデコードを再現するfakeでは、`0x40–0x43` の単独の `state=0` から単発Actionを選ぶ Slot は発生しないことを確認した。
 
 [メーカーの利用ガイド](https://mirabox.net/fr/blogs/tutorial/how-to-set-up-the-touchscreen-function-of-n4-pro?constraint=beginner-guides)は、
 純正ソフトでノブ用表示とタッチバーの操作を説明している。
